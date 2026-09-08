@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-create-bucket
+  namespace: infra
+  labels: { tier: job }
+spec:
+  backoffLimit: 5
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels: { tier: job }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2024-09-16T17-43-14Z
+          envFrom:
+            - secretRef: { name: infra-credentials }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until mc alias set local http://minio.infra.svc.cluster.local:9000 \
+                    "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do sleep 3; done
+              mc mb --ignore-existing local/rma-files

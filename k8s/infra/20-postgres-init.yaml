@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: postgres-init, namespace: infra }
+data:
+  01-init-roles.sh: |
+    #!/bin/bash
+    set -euo pipefail
+
+    run_sql() { psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB"; }
+
+    run_sql <<SQL
+    REVOKE ALL ON SCHEMA public FROM PUBLIC;
+
+    -- Shared schema for extensions, readable by every service role
+    CREATE SCHEMA ext;
+    CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA ext;
+
+    -- Single migration role owning every schema
+    CREATE ROLE migrator LOGIN PASSWORD '${MIGRATOR_PASSWORD}';
+    GRANT USAGE ON SCHEMA ext TO migrator;
+    SQL
+
+    for svc in returns logistics inspection settlement notification; do
+      var="$(echo "$svc" | tr '[:lower:]' '[:upper:]')_APP_PASSWORD"
+      svc_password="${!var}"
+
+    run_sql <<SQL
+    CREATE SCHEMA ${svc} AUTHORIZATION migrator;
+
+    CREATE ROLE ${svc}_app LOGIN PASSWORD '${svc_password}';
+    ALTER ROLE ${svc}_app SET search_path = ${svc}, ext;
+
+    GRANT USAGE ON SCHEMA ${svc}, ext TO ${svc}_app;
+
+    ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA ${svc}
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${svc}_app;
+    ALTER DEFAULT PRIVILEGES FOR ROLE migrator IN SCHEMA ${svc}
+      GRANT USAGE, SELECT ON SEQUENCES TO ${svc}_app;
+    SQL
+    done
+
+    run_sql <<SQL
+    ALTER ROLE migrator
+      SET search_path = returns, logistics, inspection, settlement, notification, ext;
+    SQL

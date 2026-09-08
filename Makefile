@@ -1,4 +1,6 @@
 .PHONY: help build test lint format run image verify-image
+SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -26,3 +28,51 @@ image:        ## Build returns-service image into a tarball
 verify-image: ## Print image architecture and layer count
 	tar -xOf returns-service/target/jib-image.tar config.json | jq -r '.architecture, .os'
 	tar -xOf returns-service/target/jib-image.tar manifest.json | jq '.[0].Layers | length'
+
+VM_HOST ?= rma.local
+KAFKA_CLUSTER_ID ?= $(shell cat .kafka-cluster-id 2>/dev/null)
+INFRA_WORKLOADS := deploy/registry deploy/redis deploy/minio deploy/schema-registry \
+                   deploy/akhq deploy/keycloak deploy/wiremock
+
+namespace:     ## Create the infra namespace
+	kubectl apply -f k8s/bootstrap/
+
+secrets: namespace   ## Create the infra-credentials secret from .env
+	@test -f .env || { echo "missing .env, see task 5.4"; exit 1; }
+	kubectl -n infra create secret generic infra-credentials \
+		--from-env-file=.env --dry-run=client -o yaml | kubectl -n infra apply -f -
+
+infra-up: namespace secrets   ## Apply infrastructure manifests and wait for readiness
+	@test -n "$(KAFKA_CLUSTER_ID)" \
+		|| { echo "missing .kafka-cluster-id, see task 5.7"; exit 1; }
+	rm -f target/rendered-infra.yaml && mkdir -p target
+	for f in k8s/infra/*.yaml; do \
+		VM_HOST='$(VM_HOST)' KAFKA_CLUSTER_ID='$(KAFKA_CLUSTER_ID)' \
+		envsubst '$$VM_HOST $$KAFKA_CLUSTER_ID' < $$f >> target/rendered-infra.yaml; \
+		echo "---" >> target/rendered-infra.yaml; \
+	done
+	kubectl -n infra apply -f target/rendered-infra.yaml
+	kubectl -n infra rollout status sts/postgres --timeout=300s
+	kubectl -n infra rollout status sts/kafka --timeout=300s
+	for w in $(INFRA_WORKLOADS); do \
+		kubectl -n infra rollout status $$w --timeout=300s; \
+	done
+	kubectl -n infra wait --for=condition=complete job/minio-create-bucket --timeout=180s
+
+infra-down:    ## Remove workloads, keep namespace and volumes
+	kubectl -n infra delete deploy,sts,job,svc --all --ignore-not-found
+	kubectl -n infra delete cm postgres-init akhq-config wiremock-mappings --ignore-not-found
+
+infra-purge:   ## Remove everything including persistent volumes
+	@echo "This deletes all data. Ctrl-C within 5 seconds to abort."; sleep 5
+	kubectl delete namespace infra --ignore-not-found
+
+infra-status:  ## Pod status and resource usage
+	kubectl -n infra get pods -o wide
+	-kubectl -n infra top pods
+
+check-arch:    ## Verify that every image has an arm64 build
+	./scripts/check-arch.sh
+
+smoke:         ## Full infrastructure smoke test
+	./scripts/smoke-infra.sh $(VM_HOST)

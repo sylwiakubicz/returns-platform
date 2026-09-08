@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: akhq-config, namespace: infra }
+data:
+  application.yml: |
+    akhq:
+      connections:
+        local:
+          properties:
+            bootstrap.servers: "kafka-0.kafka.infra.svc.cluster.local:9092"
+          schema-registry:
+            url: "http://schema-registry.infra.svc.cluster.local:8081"
+      server:
+        access-log:
+          enabled: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: akhq, namespace: infra }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: akhq }
+  template:
+    metadata:
+      labels: { app: akhq, tier: infra }
+    spec:
+      containers:
+        - name: akhq
+          image: tchiotludo/akhq:0.25.1
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 28081
+              name: management
+          env:
+            - { name: MICRONAUT_CONFIG_FILES, value: "/app/application.yml" }
+            - { name: JAVA_OPTS, value: "-Xmx320m" }
+          volumeMounts:
+            - { name: config, mountPath: /app/application.yml, subPath: application.yml }
+          resources:
+            requests: { memory: 448Mi, cpu: 100m }
+            limits:   { memory: 640Mi }
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 28081
+            initialDelaySeconds: 45
+      volumes:
+        - name: config
+          configMap: { name: akhq-config }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: akhq, namespace: infra }
+spec:
+  type: NodePort
+  selector: { app: akhq }
+  ports: [{ port: 8080, targetPort: 8080, nodePort: 30085 }]
