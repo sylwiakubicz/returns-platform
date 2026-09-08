@@ -1,4 +1,4 @@
-.PHONY: help build test lint format run image verify-image
+.PHONY: help build test lint format run image verify-image namespace secrets infra-up infra-down infra-purge infra-status check-arch smoke
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
