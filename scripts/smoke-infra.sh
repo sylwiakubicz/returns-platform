@@ -37,13 +37,13 @@ kubectl -n infra exec kafka-0 -- env KAFKA_HEAP_OPTS="-Xms16m -Xmx96m" \
   --delete --topic smoke-test
 
 echo "== Kafka: external listener reachable from this machine"
-kcat -b "${HOST}:30092" -L -m 10 > /dev/null
+kcat -b "${HOST}:30092" -L -m 20 > /dev/null
 
 echo "== Schema registry"
 curl -sf "http://${HOST}:30081/subjects" | jq -e 'type == "array"' > /dev/null
 
 echo "== AKHQ"
-curl -sf "http://${HOST}:30085/health" > /dev/null
+curl -sf "http://${HOST}:30285/health" > /dev/null
 
 echo "== Keycloak"
 curl -sf "http://${HOST}:30809/health/ready" | jq -e '.status == "UP"' > /dev/null

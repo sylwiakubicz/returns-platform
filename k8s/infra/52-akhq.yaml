@@ -56,4 +56,6 @@ metadata: { name: akhq, namespace: infra }
 spec:
   type: NodePort
   selector: { app: akhq }
-  ports: [{ port: 8080, targetPort: 8080, nodePort: 30085 }]
+  ports:
+    - { name: http, port: 8080, targetPort: 8080, nodePort: 30085 }
+    - { name: management, port: 28081, targetPort: 28081, nodePort: 30285 }
