@@ -2,7 +2,7 @@ package dev.rma.returns.domain.events;
 
 import dev.rma.returns.domain.ItemRefundDecision;
 import dev.rma.returns.domain.Money;
-import dev.rma.returns.domain.RefundDecision;
+import dev.rma.returns.domain.enums.RefundDecision;
 
 import java.time.Instant;
 import java.util.List;

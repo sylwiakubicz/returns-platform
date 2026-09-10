@@ -1,5 +1,10 @@
 package dev.rma.returns.domain;
 
+import dev.rma.returns.domain.enums.ClosureReason;
+import dev.rma.returns.domain.enums.FailureCode;
+import dev.rma.returns.domain.enums.RmaReason;
+import dev.rma.returns.domain.enums.RmaStatus;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Currency;

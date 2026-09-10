@@ -1,6 +1,6 @@
 package dev.rma.returns.domain.events;
 
-import dev.rma.returns.domain.FailureCode;
+import dev.rma.returns.domain.enums.FailureCode;
 
 import java.time.Instant;
 

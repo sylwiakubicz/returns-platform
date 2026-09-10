@@ -1,7 +1,7 @@
 package dev.rma.returns.domain.events;
 
 import dev.rma.returns.domain.RequestedItem;
-import dev.rma.returns.domain.RmaReason;
+import dev.rma.returns.domain.enums.RmaReason;
 
 import java.time.Instant;
 import java.util.Currency;
