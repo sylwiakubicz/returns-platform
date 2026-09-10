@@ -6,6 +6,7 @@ import dev.rma.returns.domain.enums.RmaReason;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 public record RmaRequested(
@@ -21,6 +22,15 @@ public record RmaRequested(
     List<RequestedItem> items
 ) implements DomainEvent{
     public RmaRequested {
+        Objects.requireNonNull(rmaId, "rmaId must not be null");
+        Objects.requireNonNull(businessNumber, "businessNumber must not be null");
+        Objects.requireNonNull(orderId, "orderId must not be null");
+        Objects.requireNonNull(customerId, "customerId must not be null");
+        Objects.requireNonNull(orderDeliveredAt, "orderDeliveredAt must not be null");
+        Objects.requireNonNull(requestedAt, "requestedAt must not be null");
+        Objects.requireNonNull(reason, "reason must not be null");
+        Objects.requireNonNull(currency, "currency must not be null");
+
         items = List.copyOf(items);
     }
 }
