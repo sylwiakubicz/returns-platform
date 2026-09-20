@@ -56,7 +56,6 @@ public final class Rma {
     ) {
         validateRequest(
             orderDeliveredAt,
-            requestedAt,
             items,
             currency,
             returnWindowDays
@@ -76,18 +75,68 @@ public final class Rma {
         );
     }
 
+    public static Rma fromHistory(List<DomainEvent> events) {
+        // TODO: events nie może być puste
+        // TODO: pierwsze zdarzenie powinno być requeste
+        var rma = new Rma();
+
+        for (DomainEvent event : events) {
+            rma.apply(event);
+        }
+
+        return rma;
+    }
+
+    private void apply(DomainEvent event) {
+        switch (event) {
+            case RmaRequested e -> apply(e);
+
+            // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
+            default -> throw new IllegalStateException("Unexpected value: " + event);
+        }
+    }
+
+    private void apply(RmaRequested event) {
+        this.rmaId = event.rmaId();
+        this.businessNumber = event.businessNumber();
+        this.orderId = event.orderId();
+        this.customerId = event.customerId();
+        this.orderDeliveredAt = event.orderDeliveredAt();
+        this.reason = event.reason();
+        this.customerNote = event.customerNote();
+        this.items = mapItems(event.items());
+        this.currency = event.currency();
+        this.status = RmaStatus.REQUESTED;
+        this.version = 1;
+    }
+
+    private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
+        return requestedItems.stream().map(this::mapItem).toList();
+    }
+
+    private RmaItem mapItem(RequestedItem requestedItem) {
+        return new RmaItem(
+            requestedItem.itemId(),
+            requestedItem.sku(),
+            requestedItem.name(),
+            requestedItem.quantity(),
+            requestedItem.unitPrice(),
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+    }
+
     private static void validateRequest(
         Instant orderDeliveredAt,
-        Instant requestedAt,
         List<RequestedItem> items,
         Currency currency,
         int returnWindowDays
     ) {
         // todo: weryfikacja czy zwrot zmescil sie w czasie
-        // todo: weryfikacja czy zwrot ma przynajmniej jeden item
-        // todo: sprawdzenie czy kazda pozycja jest wieksza od 0
         // todo: sprawdzenie czy wszystkie pozycje maja taka sama walute
-        // todo: powod zwrotu musi byc z enuma
     }
 
     public UUID rmaId() {
