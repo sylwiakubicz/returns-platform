@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertAll;
 
 public class RmaTest {
 
@@ -28,34 +29,71 @@ public class RmaTest {
 
     @Test
     void shouldCreateRequestedRma() {
-        List<RequestedItem> items = List.of(validItem());
+        List<RequestedItem> items = List.of(validRequestedItem());
 
-        RmaRequested event = new RmaRequested(
+        RmaRequested event = Rma.request(
             RMA_ID,
             "RMA-2026-000001",
             "order-1",
             "customer-1",
             DELIVERED_AT,
-            REQUESTED_AT,
             RmaReason.CHANGED_MIND,
             "Nie pasuje",
+            items,
             PLN,
-            items
+            REQUESTED_AT,
+            14);
+
+        assertAll(
+            () -> assertThat(event.rmaId()).isEqualTo(RMA_ID),
+            () -> assertThat(event.businessNumber()).isEqualTo("RMA-2026-000001"),
+            () -> assertThat(event.orderId()).isEqualTo("order-1"),
+            () -> assertThat(event.customerId()).isEqualTo("customer-1"),
+            () -> assertThat(event.customerNote()).isEqualTo("Nie pasuje"),
+            () -> assertThat(event.orderDeliveredAt()).isEqualTo(DELIVERED_AT),
+            () -> assertThat(event.requestedAt()).isEqualTo(REQUESTED_AT),
+            () -> assertThat(event.reason()).isEqualTo(RmaReason.CHANGED_MIND),
+            () -> assertThat(event.currency()).isEqualTo(PLN),
+            () -> assertThat(event.items()).containsExactlyElementsOf(items)
+        );
+    }
+
+    @Test
+    void shouldRebuildRequestedStateFromRmaRequestedEvent() {
+        // given
+        RmaRequested event = validRmaRequested();
+
+        // when
+        Rma rma = Rma.fromHistory(List.of(event));
+
+        // then
+        assertAll(
+            () -> assertThat(rma.status()).isEqualTo(RmaStatus.REQUESTED),
+            () -> assertThat(rma.version()).isEqualTo(1),
+            () -> assertThat(rma.rmaId()).isEqualTo(event.rmaId()),
+            () -> assertThat(rma.businessNumber()).isEqualTo(event.businessNumber()),
+            () -> assertThat(rma.orderId()).isEqualTo(event.orderId()),
+            () -> assertThat(rma.customerId()).isEqualTo(event.customerId()),
+            () -> assertThat(rma.currency()).isEqualTo(event.currency())
         );
 
-        assertThat(event.rmaId()).isEqualTo(RMA_ID);
-        assertThat(event.businessNumber()).isEqualTo("RMA-2026-000001");
-        assertThat(event.orderId()).isEqualTo("order-1");
-        assertThat(event.customerId()).isEqualTo("customer-1");
-        assertThat(event.orderDeliveredAt()).isEqualTo(DELIVERED_AT);
-        assertThat(event.requestedAt()).isEqualTo(REQUESTED_AT);
-        assertThat(event.reason()).isEqualTo(RmaReason.CHANGED_MIND);
-        assertThat(event.currency()).isEqualTo(PLN);
-        assertThat(event.items()).containsExactlyElementsOf(items);
+        assertThat(rma.items()).hasSize(1);
+        RmaItem item = rma.items().getFirst();
+        assertAll(
+            () -> assertThat(item.itemId()).isEqualTo("item-1"),
+            () -> assertThat(item.sku()).isEqualTo("sku-1"),
+            () -> assertThat(item.name()).isEqualTo("book"),
+            () -> assertThat(item.unitPrice()).isEqualTo(new Money(new BigDecimal("30.00"), PLN)),
+            () -> assertThat(item.grade()).isNull(),
+            () -> assertThat(item.inspectionNote()).isNull(),
+            () -> assertThat(item.photoKeys()).isEmpty(),
+            () -> assertThat(item.deductionPercent()).isNull(),
+            () -> assertThat(item.refundableAmount()).isNull()
+        );
     }
 
     private RmaRequested validRmaRequested() {
-        List<RequestedItem> items = List.of(validItem());
+        List<RequestedItem> items = List.of(validRequestedItem());
 
         return new RmaRequested(
             RMA_ID,
@@ -71,8 +109,8 @@ public class RmaTest {
         );
     }
 
-    private RequestedItem validItem() {
-        Money money = new Money(new BigDecimal(30), PLN);
+    private RequestedItem validRequestedItem() {
+        Money money = new Money(new BigDecimal("30.00"), PLN);
         return new RequestedItem(
             "item-1",
             "sku-1",
