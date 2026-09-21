@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Currency;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 public final class Rma {
@@ -136,6 +137,11 @@ public final class Rma {
         Currency currency,
         int returnWindowDays
     ) {
+        Objects.requireNonNull(orderDeliveredAt, "orderDeliveredAt must not be null");
+        Objects.requireNonNull(requestedAt, "requestedAt must not be null");
+        Objects.requireNonNull(items, "items must not be null");
+        Objects.requireNonNull(currency, "currency must not be null");
+
         Instant returnDeadline =
             orderDeliveredAt.plus(Duration.ofDays(returnWindowDays));
 
@@ -143,6 +149,13 @@ public final class Rma {
             throw new RmaDomainException(
                 RmaErrorCode.RETURN_WINDOW_EXPIRED,
                 "Return window has expired"
+            );
+        }
+
+        if (items.isEmpty()) {
+            throw new RmaDomainException(
+                RmaErrorCode.NO_ITEMS,
+                "There must be at least 1 item"
             );
         }
 
