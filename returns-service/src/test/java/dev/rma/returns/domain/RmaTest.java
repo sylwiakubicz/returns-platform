@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatException;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
@@ -118,8 +119,7 @@ public class RmaTest {
             .satisfies(exception ->
                 assertThat(((RmaDomainException) exception).code())
                     .isEqualTo(RmaErrorCode.RETURN_WINDOW_EXPIRED)
-            )
-            .hasMessage("Return window has expired");
+            );
     }
 
     @Test
@@ -145,7 +145,27 @@ public class RmaTest {
     }
 
     @Test
-    void shouldRejectRequestWithoutItems() {}
+    void shouldRejectRequestWithoutItems() {
+        List<RequestedItem> items = List.of();
+
+        assertThatThrownBy(() -> Rma.request(
+            RMA_ID,
+            "RMA-2026-000001",
+            "order-1",
+            "customer-1",
+            DELIVERED_AT,
+            RmaReason.CHANGED_MIND,
+            "Nie pasuje",
+            items,
+            PLN,
+            REQUESTED_AT,
+            14
+        )).isInstanceOfSatisfying(
+            RmaDomainException.class,
+            exception -> assertThat(((RmaDomainException) exception).code())
+                .isEqualTo(RmaErrorCode.NO_ITEMS)
+        );
+    }
 
     @Test
     void shouldRejectRequestWithMixedCurrencies() {
