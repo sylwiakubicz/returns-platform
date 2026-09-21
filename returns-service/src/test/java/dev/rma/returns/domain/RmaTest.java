@@ -92,6 +92,24 @@ public class RmaTest {
         );
     }
 
+    @Test
+    void shouldRejectRequestWhenReturnWindowExpired() {}
+
+    @Test
+    void shouldAcceptRequestOnLastDayOfReturnWindow() {}
+
+    @Test
+    void shouldRejectRequestWithoutItems() {}
+
+    @Test
+    void shouldRejectRequestWithMixedCurrencies() {}
+
+    @Test
+    void shouldRejectEmptyHistory() {}
+
+    @Test
+    void shouldRequireRmaRequestedAsFirstEvent() {}
+
     private RmaRequested validRmaRequested() {
         List<RequestedItem> items = List.of(validRequestedItem());
 
