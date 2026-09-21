@@ -1,12 +1,11 @@
 package dev.rma.returns.domain;
 
-import dev.rma.returns.domain.enums.ClosureReason;
-import dev.rma.returns.domain.enums.FailureCode;
-import dev.rma.returns.domain.enums.RmaReason;
-import dev.rma.returns.domain.enums.RmaStatus;
+import dev.rma.returns.domain.enums.*;
 import dev.rma.returns.domain.events.DomainEvent;
 import dev.rma.returns.domain.events.RmaRequested;
+import dev.rma.returns.domain.exceptions.RmaDomainException;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Currency;
@@ -56,6 +55,7 @@ public final class Rma {
     ) {
         validateRequest(
             orderDeliveredAt,
+            requestedAt,
             items,
             currency,
             returnWindowDays
@@ -131,11 +131,20 @@ public final class Rma {
 
     private static void validateRequest(
         Instant orderDeliveredAt,
+        Instant requestedAt,
         List<RequestedItem> items,
         Currency currency,
         int returnWindowDays
     ) {
-        // todo: weryfikacja czy zwrot zmescil sie w czasie
+        Instant returnDeadline =
+            orderDeliveredAt.plus(Duration.ofDays(returnWindowDays));
+
+        if (requestedAt.isAfter(returnDeadline)) {
+            throw new RmaDomainException(
+                RmaErrorCode.RETURN_WINDOW_EXPIRED,
+                "Return window has expired"
+            );
+        }
         // todo: sprawdzenie czy wszystkie pozycje maja taka sama walute
     }
 
