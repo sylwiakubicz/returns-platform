@@ -1,8 +1,10 @@
 package dev.rma.returns.domain;
 
+import dev.rma.returns.domain.enums.RmaErrorCode;
 import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
 import dev.rma.returns.domain.events.RmaRequested;
+import dev.rma.returns.domain.exceptions.RmaDomainException;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -12,6 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
 public class RmaTest {
@@ -93,7 +96,30 @@ public class RmaTest {
     }
 
     @Test
-    void shouldRejectRequestWhenReturnWindowExpired() {}
+    void shouldRejectRequestWhenReturnWindowExpired() {
+        Instant requestedAt = Instant.parse("2026-09-16T12:00:00Z");
+        List<RequestedItem> items = List.of(validRequestedItem());
+
+        assertThatThrownBy(() -> Rma.request(
+            RMA_ID,
+            "RMA-2026-000001",
+            "order-1",
+            "customer-1",
+            DELIVERED_AT,
+            RmaReason.CHANGED_MIND,
+            "Nie pasuje",
+            items,
+            PLN,
+            requestedAt,
+            14
+        ))
+            .isInstanceOf(RmaDomainException.class)
+            .satisfies(exception ->
+                assertThat(((RmaDomainException) exception).code())
+                    .isEqualTo(RmaErrorCode.RETURN_WINDOW_EXPIRED)
+            )
+            .hasMessage("Return window has expired");
+    }
 
     @Test
     void shouldAcceptRequestOnLastDayOfReturnWindow() {}
