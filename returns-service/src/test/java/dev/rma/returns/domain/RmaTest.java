@@ -122,7 +122,26 @@ public class RmaTest {
     }
 
     @Test
-    void shouldAcceptRequestOnLastDayOfReturnWindow() {}
+    void shouldAcceptRequestOnLastDayOfReturnWindow() {
+        Instant requestedAt = Instant.parse("2026-09-15T12:00:00Z");
+        List<RequestedItem> items = List.of(validRequestedItem());
+
+        RmaRequested event = Rma.request(
+            RMA_ID,
+            "RMA-2026-000001",
+            "order-1",
+            "customer-1",
+            DELIVERED_AT,
+            RmaReason.CHANGED_MIND,
+            "Nie pasuje",
+            items,
+            PLN,
+            requestedAt,
+            14
+        );
+
+        assertThat(event).isNotNull();
+    }
 
     @Test
     void shouldRejectRequestWithoutItems() {}
