@@ -145,7 +145,15 @@ public final class Rma {
                 "Return window has expired"
             );
         }
-        // todo: sprawdzenie czy wszystkie pozycje maja taka sama walute
+
+        for (RequestedItem item : items) {
+            if (!item.unitPrice().currency().equals(currency)) {
+                throw new RmaDomainException(
+                    RmaErrorCode.MIXED_CURRENCIES,
+                    "Mixed currencies are forbidden"
+                );
+            }
+        }
     }
 
     public UUID rmaId() {
