@@ -1,6 +1,9 @@
 package dev.rma.returns.domain;
 
 
+import dev.rma.returns.domain.enums.RmaErrorCode;
+import dev.rma.returns.domain.exceptions.RmaDomainException;
+
 import java.util.Objects;
 
 public record RequestedItem(
@@ -17,7 +20,10 @@ public record RequestedItem(
         Objects.requireNonNull(unitPrice, "unitPrice must not be null");
 
         if (quantity < 1) {
-            throw new IllegalArgumentException("quantity must be grater or equals to 1");
+            throw new RmaDomainException(
+                RmaErrorCode.INVALID_QUANTITY,
+                "Quantity must be greater than or equal to 1"
+            );
         }
 
     }
