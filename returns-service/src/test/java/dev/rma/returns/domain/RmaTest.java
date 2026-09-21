@@ -29,6 +29,7 @@ public class RmaTest {
         Instant.parse("2026-09-01T12:00:00Z");
 
     private static final Currency PLN = Currency.getInstance("PLN");
+    private static final Currency EUR = Currency.getInstance("EUR");
 
     @Test
     void shouldCreateRequestedRma() {
@@ -147,7 +148,44 @@ public class RmaTest {
     void shouldRejectRequestWithoutItems() {}
 
     @Test
-    void shouldRejectRequestWithMixedCurrencies() {}
+    void shouldRejectRequestWithMixedCurrencies() {
+        Money moneyPln = new Money(new BigDecimal("30.00"), PLN);
+        Money moneyEur = new Money(new BigDecimal("30.00"), EUR);
+
+        List<RequestedItem> items = List.of(
+            new RequestedItem(
+            "item-1",
+            "sku-1",
+            "book-1",
+            1,
+            moneyEur),
+            new RequestedItem(
+                "item-2",
+                "sku-2",
+                "book-2",
+                1,
+                moneyPln)
+            );
+
+        assertThatThrownBy(() -> Rma.request(
+            RMA_ID,
+            "RMA-2026-000001",
+            "order-1",
+            "customer-1",
+            DELIVERED_AT,
+            RmaReason.CHANGED_MIND,
+            "Nie pasuje",
+            items,
+            PLN,
+            REQUESTED_AT,
+            14
+        ))
+            .isInstanceOfSatisfying(
+                RmaDomainException.class,
+                exception -> assertThat(exception.code())
+                    .isEqualTo(RmaErrorCode.MIXED_CURRENCIES)
+            );
+    }
 
     @Test
     void shouldRejectEmptyHistory() {}
