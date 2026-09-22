@@ -82,7 +82,11 @@ public final class Rma {
         if (events.isEmpty()) {
             throw new IllegalArgumentException("Event history must not be empty");
         }
-        // TODO: pierwsze zdarzenie powinno być requeste
+
+        if (!(events.getFirst() instanceof RmaRequested)) {
+            throw new IllegalArgumentException("RmaRequested must be the first event");
+        }
+
         var rma = new Rma();
 
         for (DomainEvent event : events) {
