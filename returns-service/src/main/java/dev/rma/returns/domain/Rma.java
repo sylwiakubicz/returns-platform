@@ -77,7 +77,11 @@ public final class Rma {
     }
 
     public static Rma fromHistory(List<DomainEvent> events) {
-        // TODO: events nie może być puste
+        Objects.requireNonNull(events, "events must not be null");
+
+        if (events.isEmpty()) {
+            throw new IllegalArgumentException("Event history must not be empty");
+        }
         // TODO: pierwsze zdarzenie powinno być requeste
         var rma = new Rma();
 
