@@ -12,9 +12,8 @@ import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
 
-import static java.beans.Beans.isInstanceOf;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RmaRequestedTest {
     private static final UUID RMA_ID =
@@ -27,7 +26,6 @@ class RmaRequestedTest {
         Instant.parse("2026-09-01T12:00:00Z");
 
     private static final Currency PLN = Currency.getInstance("PLN");
-    private static final Currency EUR = Currency.getInstance("EUR");
 
     @Test
     void shouldRejectNullRmaId() {
@@ -206,7 +204,7 @@ class RmaRequestedTest {
             List.of(validRequestedItem())
         );
 
-        assertThat(event.rmaId()).isEqualTo(RMA_ID);
+        assertThat(event.customerNote()).isNull();
     }
 
     @Test
@@ -228,7 +226,7 @@ class RmaRequestedTest {
         );
 
         items.add(validRequestedItem());
-        assertThat(event.items().size()).isEqualTo(1);
+        assertThat(event.items()).hasSize(1);
 
     }
 
