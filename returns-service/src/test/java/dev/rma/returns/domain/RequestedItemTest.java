@@ -1,5 +1,6 @@
 package dev.rma.returns.domain;
 
+import dev.rma.returns.domain.enums.RmaErrorCode;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 import org.junit.jupiter.api.Test;
 
@@ -75,8 +76,9 @@ class RequestedItemTest {
             0,
             MONEY
         ))
-            .isInstanceOf(RmaDomainException.class)
-            .hasMessage("Quantity must be greater than or equal to 1");
+            .isInstanceOfSatisfying(RmaDomainException.class,
+                exception -> assertThat(exception.code())
+                    .isEqualTo(RmaErrorCode.INVALID_QUANTITY));
     }
 
     @Test
@@ -88,8 +90,9 @@ class RequestedItemTest {
             -1,
             MONEY
         ))
-            .isInstanceOf(RmaDomainException.class)
-            .hasMessage("Quantity must be greater than or equal to 1");
+            .isInstanceOfSatisfying(RmaDomainException.class,
+        exception -> assertThat(exception.code())
+            .isEqualTo(RmaErrorCode.INVALID_QUANTITY));
     }
 
     @Test
