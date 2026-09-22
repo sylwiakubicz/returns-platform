@@ -3,6 +3,8 @@ package dev.rma.returns.domain;
 import dev.rma.returns.domain.enums.RmaErrorCode;
 import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
+import dev.rma.returns.domain.events.DomainEvent;
+import dev.rma.returns.domain.events.LabelIssued;
 import dev.rma.returns.domain.events.RmaRequested;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 import org.junit.jupiter.api.Test;
@@ -209,12 +211,19 @@ public class RmaTest {
 
     @Test
     void shouldRejectEmptyHistory() {
-        assertThatThrownBy(() -> Rma.fromHistory(List.of())
-        ).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Rma.fromHistory(List.of()))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("Event history must not be empty");
     }
 
     @Test
-    void shouldRequireRmaRequestedAsFirstEvent() {}
+    void shouldRequireRmaRequestedAsFirstEvent() {
+        DomainEvent wrongFirstEvent = new LabelIssued(
+            "label-1", "tracking-1", "fileKey", REQUESTED_AT);
+        assertThatThrownBy(() -> Rma.fromHistory(List.of(wrongFirstEvent)))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("RmaRequested must be the first event");;
+    }
 
     private RmaRequested validRmaRequested() {
         List<RequestedItem> items = List.of(validRequestedItem());
