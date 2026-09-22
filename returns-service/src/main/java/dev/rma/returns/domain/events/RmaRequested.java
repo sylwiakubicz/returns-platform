@@ -30,6 +30,7 @@ public record RmaRequested(
         Objects.requireNonNull(requestedAt, "requestedAt must not be null");
         Objects.requireNonNull(reason, "reason must not be null");
         Objects.requireNonNull(currency, "currency must not be null");
+        Objects.requireNonNull(items, "items must not be null");
 
         items = List.copyOf(items);
     }
