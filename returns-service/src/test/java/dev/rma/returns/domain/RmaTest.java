@@ -208,7 +208,10 @@ public class RmaTest {
     }
 
     @Test
-    void shouldRejectEmptyHistory() {}
+    void shouldRejectEmptyHistory() {
+        assertThatThrownBy(() -> Rma.fromHistory(List.of())
+        ).isInstanceOf(IllegalArgumentException.class);
+    }
 
     @Test
     void shouldRequireRmaRequestedAsFirstEvent() {}
