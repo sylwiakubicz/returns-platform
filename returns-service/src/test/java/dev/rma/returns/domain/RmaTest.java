@@ -256,6 +256,14 @@ public class RmaTest {
     }
 
     @Test
+    void shouldRejectLabelIssuingWhenRmaIsNotRequested() {
+        RmaRequested rmaRequested = validRmaRequested();
+        Rma rma = Rma.fromHistory(List.of(rmaRequested));
+
+
+    }
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)

@@ -83,12 +83,16 @@ public final class Rma {
         String labelFileKey,
         Instant issuedAt
     ) {
-        return new LabelIssued(
+        LabelIssued labelIssued =  new LabelIssued(
             labelId,
             trackingNumber,
             labelFileKey,
             issuedAt
         );
+
+        apply(labelIssued);
+
+        return labelIssued;
     }
 
     public static Rma fromHistory(List<DomainEvent> events) {
@@ -114,6 +118,7 @@ public final class Rma {
     private void apply(DomainEvent event) {
         switch (event) {
             case RmaRequested e -> apply(e);
+            case LabelIssued e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -132,6 +137,13 @@ public final class Rma {
         this.currency = event.currency();
         this.status = RmaStatus.REQUESTED;
         this.version = 1;
+    }
+
+    private void apply(LabelIssued labelIssued) {
+        this.labelId = labelIssued.labelId();
+        this.trackingNumber = labelIssued.trackingNumber();
+        this.status = RmaStatus.LABEL_ISSUED;
+        this.version += 1;
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
