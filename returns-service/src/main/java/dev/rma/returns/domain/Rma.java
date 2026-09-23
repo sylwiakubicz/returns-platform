@@ -4,6 +4,7 @@ import dev.rma.returns.domain.enums.*;
 import dev.rma.returns.domain.events.DomainEvent;
 import dev.rma.returns.domain.events.LabelIssued;
 import dev.rma.returns.domain.events.RmaRequested;
+import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
 import java.time.Duration;
@@ -83,6 +84,9 @@ public final class Rma {
         String labelFileKey,
         Instant issuedAt
     ) {
+        if (status != RmaStatus.REQUESTED) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.LABEL_ISSUED);
+        }
         LabelIssued labelIssued =  new LabelIssued(
             labelId,
             trackingNumber,
