@@ -30,14 +30,22 @@ public class RmaTest {
     private static final Instant DELIVERED_AT =
         Instant.parse("2026-09-01T12:00:00Z");
 
-    private static final Currency PLN = Currency.getInstance("PLN");
-    private static final Currency EUR = Currency.getInstance("EUR");
+    private static final Instant ISSUED_AT =
+        Instant.parse("2026-09-10T12:00:00Z");
 
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
     private static final String CUSTOMER_ID = "customer-1";
 
+    private static final String LABEL_ID = "label-1";
+    private static final String TRACKING_NUMBER = "tr-1";
+    private static final String LABEL_FILE_KEY = "key";
+
+    private static final Currency PLN = Currency.getInstance("PLN");
+    private static final Currency EUR = Currency.getInstance("EUR");
+
     private static final int RETURN_WINDOW_DAYS = 14;
+
 
     @Test
     void shouldCreateRequestedRma() {
@@ -212,6 +220,25 @@ public class RmaTest {
                 exception -> assertThat(exception.code())
                     .isEqualTo(RmaErrorCode.MIXED_CURRENCIES)
             );
+    }
+
+    @Test
+    void shouldIssueLabelForRequestedRma() {
+        RmaRequested rmaRequested = validRmaRequested();
+        Rma rma = Rma.fromHistory(List.of(rmaRequested));
+
+        LabelIssued labelIssued = rma.issueLabel(
+            LABEL_ID,
+            TRACKING_NUMBER,
+            LABEL_FILE_KEY,
+            ISSUED_AT
+        );
+        assertAll(
+            () -> assertThat(labelIssued.labelId()).isEqualTo(LABEL_ID),
+            () -> assertThat(labelIssued.trackingNumber()).isEqualTo(TRACKING_NUMBER),
+            () -> assertThat(labelIssued.labelFileKey()).isEqualTo(LABEL_FILE_KEY),
+            () -> assertThat(labelIssued.issuedAt()).isEqualTo(ISSUED_AT)
+        );
     }
 
     @Test
