@@ -8,7 +8,7 @@ public record LabelIssued(
     String trackingNumber,
     String labelFileKey,
     Instant issuedAt
-) implements DomainEvent{
+) implements DomainEvent {
     public LabelIssued {
         Objects.requireNonNull(labelId, "labelId must not be null");
         Objects.requireNonNull(trackingNumber, "trackingNumber must not be null");
