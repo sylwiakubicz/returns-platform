@@ -6,6 +6,7 @@ import dev.rma.returns.domain.enums.RmaStatus;
 import dev.rma.returns.domain.events.DomainEvent;
 import dev.rma.returns.domain.events.LabelIssued;
 import dev.rma.returns.domain.events.RmaRequested;
+import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 import org.junit.jupiter.api.Test;
 
@@ -257,10 +258,21 @@ public class RmaTest {
 
     @Test
     void shouldRejectLabelIssuingWhenRmaIsNotRequested() {
-        RmaRequested rmaRequested = validRmaRequested();
-        Rma rma = Rma.fromHistory(List.of(rmaRequested));
+        Rma rma = Rma.fromHistory( List.of(
+            validRmaRequested(),
+            validLabelIssued()
+        ));
 
-
+        assertThatThrownBy(() -> rma.issueLabel(
+            LABEL_ID,
+            TRACKING_NUMBER,
+            LABEL_FILE_KEY,
+            ISSUED_AT
+        ))
+            .isInstanceOf(InvalidRmaStateTransitionException.class)
+            .hasMessage(
+                "Invalid RMA state transition from LABEL_ISSUED to LABEL_ISSUED"
+            );
     }
 
     @Test
