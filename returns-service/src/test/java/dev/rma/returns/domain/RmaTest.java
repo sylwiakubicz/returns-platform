@@ -15,8 +15,7 @@ import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.*;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
 public class RmaTest {
@@ -242,6 +241,21 @@ public class RmaTest {
     }
 
     @Test
+    void shouldRebuildLabelIssuedStateFromHistory() {
+        Rma rma = Rma.fromHistory( List.of(
+            validRmaRequested(),
+            validLabelIssued()
+        ));
+
+        assertAll(
+            () -> assertThat(rma.status()).isEqualTo(RmaStatus.LABEL_ISSUED),
+            () -> assertThat(rma.version()).isEqualTo(2),
+            () -> assertThat(rma.labelId()).isEqualTo(LABEL_ID),
+            () -> assertThat(rma.trackingNumber()).isEqualTo(TRACKING_NUMBER)
+        );
+    }
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)
@@ -271,6 +285,15 @@ public class RmaTest {
             "Nie pasuje",
             PLN,
             items
+        );
+    }
+
+    private LabelIssued validLabelIssued() {
+        return new LabelIssued(
+            LABEL_ID,
+            TRACKING_NUMBER,
+            LABEL_FILE_KEY,
+            ISSUED_AT
         );
     }
 
