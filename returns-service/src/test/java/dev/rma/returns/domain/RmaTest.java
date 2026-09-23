@@ -16,8 +16,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatException;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
 public class RmaTest {
@@ -34,28 +33,34 @@ public class RmaTest {
     private static final Currency PLN = Currency.getInstance("PLN");
     private static final Currency EUR = Currency.getInstance("EUR");
 
+    private static final String BUSINESS_NUMBER = "RMA-2026-000001";
+    private static final String ORDER_ID = "order-1";
+    private static final String CUSTOMER_ID = "customer-1";
+
+    private static final int RETURN_WINDOW_DAYS = 14;
+
     @Test
     void shouldCreateRequestedRma() {
         List<RequestedItem> items = List.of(validRequestedItem());
 
         RmaRequested event = Rma.request(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             RmaReason.CHANGED_MIND,
             "Nie pasuje",
             items,
             PLN,
             REQUESTED_AT,
-            14);
+            RETURN_WINDOW_DAYS);
 
         assertAll(
             () -> assertThat(event.rmaId()).isEqualTo(RMA_ID),
-            () -> assertThat(event.businessNumber()).isEqualTo("RMA-2026-000001"),
-            () -> assertThat(event.orderId()).isEqualTo("order-1"),
-            () -> assertThat(event.customerId()).isEqualTo("customer-1"),
+            () -> assertThat(event.businessNumber()).isEqualTo(BUSINESS_NUMBER),
+            () -> assertThat(event.orderId()).isEqualTo(ORDER_ID),
+            () -> assertThat(event.customerId()).isEqualTo(CUSTOMER_ID),
             () -> assertThat(event.customerNote()).isEqualTo("Nie pasuje"),
             () -> assertThat(event.orderDeliveredAt()).isEqualTo(DELIVERED_AT),
             () -> assertThat(event.requestedAt()).isEqualTo(REQUESTED_AT),
@@ -106,16 +111,16 @@ public class RmaTest {
 
         assertThatThrownBy(() -> Rma.request(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             RmaReason.CHANGED_MIND,
             "Nie pasuje",
             items,
             PLN,
             requestedAt,
-            14
+            RETURN_WINDOW_DAYS
         ))
             .isInstanceOf(RmaDomainException.class)
             .satisfies(exception ->
@@ -131,16 +136,16 @@ public class RmaTest {
 
         RmaRequested event = Rma.request(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             RmaReason.CHANGED_MIND,
             "Nie pasuje",
             items,
             PLN,
             requestedAt,
-            14
+            RETURN_WINDOW_DAYS
         );
 
         assertThat(event).isNotNull();
@@ -152,16 +157,16 @@ public class RmaTest {
 
         assertThatThrownBy(() -> Rma.request(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             RmaReason.CHANGED_MIND,
             "Nie pasuje",
             items,
             PLN,
             REQUESTED_AT,
-            14
+            RETURN_WINDOW_DAYS
         )).isInstanceOfSatisfying(
             RmaDomainException.class,
             exception -> assertThat(((RmaDomainException) exception).code())
@@ -176,11 +181,11 @@ public class RmaTest {
 
         List<RequestedItem> items = List.of(
             new RequestedItem(
-            "item-1",
-            "sku-1",
-            "book-1",
-            1,
-            moneyEur),
+                "item-1",
+                "sku-1",
+                "book-1",
+                1,
+                moneyEur),
             new RequestedItem(
                 "item-2",
                 "sku-2",
@@ -191,16 +196,16 @@ public class RmaTest {
 
         assertThatThrownBy(() -> Rma.request(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             RmaReason.CHANGED_MIND,
             "Nie pasuje",
             items,
             PLN,
             REQUESTED_AT,
-            14
+            RETURN_WINDOW_DAYS
         ))
             .isInstanceOfSatisfying(
                 RmaDomainException.class,
@@ -230,9 +235,9 @@ public class RmaTest {
 
         return new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,

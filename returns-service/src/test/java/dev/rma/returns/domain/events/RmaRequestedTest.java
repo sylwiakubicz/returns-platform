@@ -19,6 +19,12 @@ class RmaRequestedTest {
     private static final UUID RMA_ID =
         UUID.fromString("018f0000-0000-7000-8000-000000000001");
 
+    private static final String ORDER_ID = "order-1";
+
+    private static final String CUSTOMER_ID = "customer-1";
+
+    private static final String BUSINESS_NUMBER = "RMA-2026-000001";
+
     private static final Instant REQUESTED_AT =
         Instant.parse("2026-09-10T12:00:00Z");
 
@@ -31,9 +37,9 @@ class RmaRequestedTest {
     void shouldRejectNullRmaId() {
         assertThatThrownBy(() -> new RmaRequested(
             null,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
@@ -50,8 +56,8 @@ class RmaRequestedTest {
         assertThatThrownBy(() -> new RmaRequested(
             RMA_ID,
             null,
-            "order-1",
-            "customer-1",
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
@@ -67,9 +73,9 @@ class RmaRequestedTest {
     void shouldRejectNullOrderId() {
         assertThatThrownBy(() -> new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
+            BUSINESS_NUMBER,
             null,
-            "customer-1",
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
@@ -85,8 +91,8 @@ class RmaRequestedTest {
     void shouldRejectNullCustomerId() {
         assertThatThrownBy(() -> new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
             null,
             DELIVERED_AT,
             REQUESTED_AT,
@@ -103,9 +109,9 @@ class RmaRequestedTest {
     void shouldRejectNullOrderDeliveredAt() {
         assertThatThrownBy(() -> new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             null,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
@@ -121,9 +127,9 @@ class RmaRequestedTest {
     void shouldRejectNullRequestedAt() {
         assertThatThrownBy(() -> new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             null,
             RmaReason.CHANGED_MIND,
@@ -139,9 +145,9 @@ class RmaRequestedTest {
     void shouldRejectNullReason() {
         assertThatThrownBy(() -> new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             null,
@@ -157,9 +163,9 @@ class RmaRequestedTest {
     void shouldRejectNullCurrency() {
         assertThatThrownBy(() -> new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
@@ -175,9 +181,9 @@ class RmaRequestedTest {
     void shouldRejectNullItems() {
         assertThatThrownBy(() -> new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
@@ -193,9 +199,9 @@ class RmaRequestedTest {
     void shouldAllowNullCustomerNote() {
         RmaRequested event = new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
@@ -214,9 +220,9 @@ class RmaRequestedTest {
 
         RmaRequested event = new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
@@ -234,9 +240,9 @@ class RmaRequestedTest {
     void shouldExposeImmutableItems() {
         RmaRequested event = new RmaRequested(
             RMA_ID,
-            "RMA-2026-000001",
-            "order-1",
-            "customer-1",
+            BUSINESS_NUMBER,
+            ORDER_ID,
+            CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
             RmaReason.CHANGED_MIND,
