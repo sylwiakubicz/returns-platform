@@ -2,6 +2,7 @@ package dev.rma.returns.domain;
 
 import dev.rma.returns.domain.enums.*;
 import dev.rma.returns.domain.events.DomainEvent;
+import dev.rma.returns.domain.events.LabelIssued;
 import dev.rma.returns.domain.events.RmaRequested;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
@@ -73,6 +74,20 @@ public final class Rma {
             customerNote,
             currency,
             items
+        );
+    }
+
+    public LabelIssued issueLabel(
+        String labelId,
+        String trackingNumber,
+        String labelFileKey,
+        Instant issuedAt
+    ) {
+        return new LabelIssued(
+            labelId,
+            trackingNumber,
+            labelFileKey,
+            issuedAt
         );
     }
 
