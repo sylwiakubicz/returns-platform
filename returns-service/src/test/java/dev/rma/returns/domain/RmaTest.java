@@ -302,6 +302,21 @@ public class RmaTest {
     }
 
     @Test
+    void shouldRejectPickupSchedulingWhenRmaIsNotLabelIssued() {
+        Rma rma = Rma.fromHistory( List.of(
+            validRmaRequested()
+        ));
+
+        assertThatThrownBy(() -> rma.schedulePickup(
+            PICKUP_ID,
+            SCHEDULED_FOR
+        )).isInstanceOf(InvalidRmaStateTransitionException.class)
+            .hasMessage( "Invalid RMA state transition from REQUESTED_RMA to PICKUP_SCHEDULED");
+
+
+    }
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)
