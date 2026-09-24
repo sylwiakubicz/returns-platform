@@ -327,7 +327,7 @@ public class RmaTest {
             PICKUP_ID,
             SCHEDULED_FOR
         )).isInstanceOf(InvalidRmaStateTransitionException.class)
-            .hasMessage( "Invalid RMA state transition from REQUESTED_RMA to PICKUP_SCHEDULED");
+            .hasMessage( "Invalid RMA state transition from REQUESTED to PICKUP_SCHEDULED");
 
 
     }
@@ -342,6 +342,30 @@ public class RmaTest {
         ParcelInTransit parcelInTransit = rma.markParcelInTransit(COLLECTED_AT);
 
         assertThat(parcelInTransit.collectedAt()).isEqualTo(COLLECTED_AT);
+    }
+
+    @Test
+    void shouldMarkParcelInTransitFromPickupScheduled() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled()
+        ));
+
+        ParcelInTransit parcelInTransit = rma.markParcelInTransit(COLLECTED_AT);
+
+        assertThat(parcelInTransit.collectedAt()).isEqualTo(COLLECTED_AT);
+    }
+
+    @Test
+    void shouldRejectParcelInTransitWhenRmaIsInInvalidState() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested()
+        ));
+
+        assertThatThrownBy(() -> rma.markParcelInTransit(COLLECTED_AT))
+            .isInstanceOf(InvalidRmaStateTransitionException.class)
+            .hasMessage("Invalid RMA state transition from REQUESTED to IN_TRANSIT");
     }
 
     @Test
