@@ -3,10 +3,7 @@ package dev.rma.returns.domain;
 import dev.rma.returns.domain.enums.RmaErrorCode;
 import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
-import dev.rma.returns.domain.events.DomainEvent;
-import dev.rma.returns.domain.events.LabelIssued;
-import dev.rma.returns.domain.events.PickupScheduled;
-import dev.rma.returns.domain.events.RmaRequested;
+import dev.rma.returns.domain.events.*;
 import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 import org.junit.jupiter.api.Test;
@@ -14,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
@@ -37,6 +35,9 @@ public class RmaTest {
 
     private static final LocalDate SCHEDULED_FOR =
         LocalDate.parse("2026-09-15");
+
+    private static final Instant COLLECTED_AT =
+        Instant.parse("2026-09-16T13:00:00Z");
 
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
@@ -329,6 +330,18 @@ public class RmaTest {
             .hasMessage( "Invalid RMA state transition from REQUESTED_RMA to PICKUP_SCHEDULED");
 
 
+    }
+
+    @Test
+    void shouldMarkParcelInTransitFromLabelIssued() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued()
+        ));
+
+        ParcelInTransit parcelInTransit = rma.markParcelInTransit(COLLECTED_AT);
+
+        assertThat(parcelInTransit.collectedAt()).isEqualTo(COLLECTED_AT);
     }
 
     @Test
