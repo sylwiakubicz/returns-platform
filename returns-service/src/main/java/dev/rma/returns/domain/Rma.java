@@ -101,7 +101,11 @@ public final class Rma {
         if (status != RmaStatus.LABEL_ISSUED && status != RmaStatus.PICKUP_SCHEDULED) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.IN_TRANSIT);
         }
-        return new ParcelInTransit(collectedAt);
+        ParcelInTransit parcelInTransit = new ParcelInTransit(collectedAt);
+
+        apply(parcelInTransit);
+
+        return parcelInTransit;
     }
 
     public PickupScheduled schedulePickup(String pickupId, LocalDate scheduledFor) {
@@ -141,6 +145,7 @@ public final class Rma {
             case RmaRequested e -> apply(e);
             case LabelIssued e -> apply(e);
             case PickupScheduled e -> apply(e);
+            case ParcelInTransit e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -172,6 +177,11 @@ public final class Rma {
         this.version += 1;
         this.status = RmaStatus.PICKUP_SCHEDULED;
         this.pickupScheduledFor = pickupScheduled.scheduledFor();
+    }
+
+    private void apply(ParcelInTransit parcelInTransit) {
+        this.version += 1;
+        this.status = RmaStatus.IN_TRANSIT;
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
