@@ -5,6 +5,7 @@ import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
 import dev.rma.returns.domain.events.DomainEvent;
 import dev.rma.returns.domain.events.LabelIssued;
+import dev.rma.returns.domain.events.PickupScheduled;
 import dev.rma.returns.domain.events.RmaRequested;
 import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
@@ -33,6 +35,9 @@ public class RmaTest {
     private static final Instant ISSUED_AT =
         Instant.parse("2026-09-10T12:00:00Z");
 
+    private static final LocalDate SCHEDULED_FOR =
+        LocalDate.parse("2026-09-15");
+
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
     private static final String CUSTOMER_ID = "customer-1";
@@ -40,6 +45,8 @@ public class RmaTest {
     private static final String LABEL_ID = "label-1";
     private static final String TRACKING_NUMBER = "tr-1";
     private static final String LABEL_FILE_KEY = "key";
+
+    private static final String PICKUP_ID = "pickup-id-1";
 
     private static final Currency PLN = Currency.getInstance("PLN");
     private static final Currency EUR = Currency.getInstance("EUR");
@@ -273,6 +280,25 @@ public class RmaTest {
             .hasMessage(
                 "Invalid RMA state transition from LABEL_ISSUED to LABEL_ISSUED"
             );
+    }
+
+    @Test
+    void shouldSchedulePickupForRmaWithIssuedLabel() {
+        Rma rma = Rma.fromHistory( List.of(
+            validRmaRequested(),
+            validLabelIssued()
+        ));
+
+        PickupScheduled pickupScheduled = rma.schedulePickup(
+            PICKUP_ID,
+            SCHEDULED_FOR
+        );
+
+        assertAll(
+            () -> assertThat(pickupScheduled.pickupId()).isEqualTo(PICKUP_ID),
+            () -> assertThat(pickupScheduled.scheduledFor()).isEqualTo(SCHEDULED_FOR)
+        );
+
     }
 
     @Test
