@@ -302,6 +302,21 @@ public class RmaTest {
     }
 
     @Test
+    void shouldRebuildPickupScheduledStateFromHistory() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled()
+        ));
+
+        assertAll(
+            () -> assertThat(rma.version()).isEqualTo(3),
+            () -> assertThat(rma.status()).isEqualTo(RmaStatus.PICKUP_SCHEDULED),
+            () -> assertThat(rma.pickupScheduledFor()).isEqualTo(SCHEDULED_FOR)
+        );
+    }
+
+    @Test
     void shouldRejectPickupSchedulingWhenRmaIsNotLabelIssued() {
         Rma rma = Rma.fromHistory( List.of(
             validRmaRequested()
@@ -347,6 +362,10 @@ public class RmaTest {
             PLN,
             items
         );
+    }
+
+    private PickupScheduled validPickupScheduled() {
+        return new PickupScheduled(PICKUP_ID, SCHEDULED_FOR);
     }
 
     private LabelIssued validLabelIssued() {
