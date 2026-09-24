@@ -104,7 +104,12 @@ public final class Rma {
         if (status != RmaStatus.LABEL_ISSUED) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.PICKUP_SCHEDULED);
         }
-        return new PickupScheduled(pickupId, scheduledFor);
+
+        PickupScheduled pickupScheduled = new PickupScheduled(pickupId, scheduledFor);
+
+        apply(pickupScheduled);
+
+        return pickupScheduled;
     }
 
     public static Rma fromHistory(List<DomainEvent> events) {
@@ -131,6 +136,7 @@ public final class Rma {
         switch (event) {
             case RmaRequested e -> apply(e);
             case LabelIssued e -> apply(e);
+            case PickupScheduled e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -156,6 +162,12 @@ public final class Rma {
         this.trackingNumber = labelIssued.trackingNumber();
         this.status = RmaStatus.LABEL_ISSUED;
         this.version += 1;
+    }
+
+    private void apply(PickupScheduled pickupScheduled) {
+        this.version += 1;
+        this.status = RmaStatus.PICKUP_SCHEDULED;
+        this.pickupScheduledFor = pickupScheduled.scheduledFor();
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
