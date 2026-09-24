@@ -1,10 +1,7 @@
 package dev.rma.returns.domain;
 
 import dev.rma.returns.domain.enums.*;
-import dev.rma.returns.domain.events.DomainEvent;
-import dev.rma.returns.domain.events.LabelIssued;
-import dev.rma.returns.domain.events.PickupScheduled;
-import dev.rma.returns.domain.events.RmaRequested;
+import dev.rma.returns.domain.events.*;
 import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
@@ -98,6 +95,10 @@ public final class Rma {
         apply(labelIssued);
 
         return labelIssued;
+    }
+
+    public ParcelInTransit markParcelInTransit(Instant collectedAt) {
+        return new ParcelInTransit(collectedAt);
     }
 
     public PickupScheduled schedulePickup(String pickupId, LocalDate scheduledFor) {
