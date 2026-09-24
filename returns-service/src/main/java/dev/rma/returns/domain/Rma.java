@@ -101,6 +101,9 @@ public final class Rma {
     }
 
     public PickupScheduled schedulePickup(String pickupId, LocalDate scheduledFor) {
+        if (status != RmaStatus.LABEL_ISSUED) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.PICKUP_SCHEDULED);
+        }
         return new PickupScheduled(pickupId, scheduledFor);
     }
 
