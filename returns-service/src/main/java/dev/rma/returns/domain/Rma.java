@@ -98,6 +98,9 @@ public final class Rma {
     }
 
     public ParcelInTransit markParcelInTransit(Instant collectedAt) {
+        if (status != RmaStatus.LABEL_ISSUED && status != RmaStatus.PICKUP_SCHEDULED) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.IN_TRANSIT);
+        }
         return new ParcelInTransit(collectedAt);
     }
 
