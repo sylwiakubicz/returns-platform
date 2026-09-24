@@ -369,6 +369,21 @@ public class RmaTest {
     }
 
     @Test
+    void shouldRebuildInTransitStateFromHistory() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit()
+        ));
+
+        assertAll(
+            () -> assertThat(rma.version()).isEqualTo(4),
+            () -> assertThat(rma.status()).isEqualTo(RmaStatus.IN_TRANSIT)
+        );
+    }
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)
@@ -412,6 +427,10 @@ public class RmaTest {
             LABEL_FILE_KEY,
             ISSUED_AT
         );
+    }
+
+    private ParcelInTransit validParcelInTransit() {
+        return new ParcelInTransit(COLLECTED_AT);
     }
 
     private RequestedItem validRequestedItem() {
