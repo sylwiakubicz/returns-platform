@@ -124,7 +124,9 @@ public final class Rma {
         if (status != RmaStatus.IN_TRANSIT) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.RECEIVED);
         }
-        return new ParcelReceived(receivedAt, werehouseId);
+        ParcelReceived parcelReceived = new ParcelReceived(receivedAt, werehouseId);
+        apply(parcelReceived);
+        return parcelReceived;
     }
 
     public static Rma fromHistory(List<DomainEvent> events) {
@@ -153,6 +155,7 @@ public final class Rma {
             case LabelIssued e -> apply(e);
             case PickupScheduled e -> apply(e);
             case ParcelInTransit e -> apply(e);
+            case ParcelReceived e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -189,6 +192,11 @@ public final class Rma {
     private void apply(ParcelInTransit parcelInTransit) {
         this.version += 1;
         this.status = RmaStatus.IN_TRANSIT;
+    }
+
+    private void apply(ParcelReceived parcelReceived) {
+        this.version += 1;
+        this.status = RmaStatus.RECEIVED;
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
