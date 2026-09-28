@@ -120,6 +120,10 @@ public final class Rma {
         return pickupScheduled;
     }
 
+    public ParcelReceived receive(Instant receivedAt, String werehouseId) {
+        return new ParcelReceived(receivedAt, werehouseId);
+    }
+
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
 
