@@ -412,6 +412,22 @@ public class RmaTest {
     }
 
     @Test
+    void shouldRebuildReceivedStateFromHistory() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived()
+        ));
+
+        assertAll(
+            () -> assertThat(rma.status()).isEqualTo(RmaStatus.RECEIVED),
+            () -> assertThat(rma.version()).isEqualTo(5)
+        );
+    }
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)
@@ -460,6 +476,8 @@ public class RmaTest {
     private ParcelInTransit validParcelInTransit() {
         return new ParcelInTransit(COLLECTED_AT);
     }
+
+    private ParcelReceived validParcelReceived() {return new ParcelReceived(RECEIVED_AT, "W1");}
 
     private RequestedItem validRequestedItem() {
         Money money = new Money(new BigDecimal("30.00"), PLN);
