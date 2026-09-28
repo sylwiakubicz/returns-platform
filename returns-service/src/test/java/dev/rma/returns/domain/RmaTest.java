@@ -403,6 +403,15 @@ public class RmaTest {
     }
 
     @Test
+    void shouldRejectParcelReceivedWhenRmaIsNotInTransit() {
+        Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
+
+        assertThatThrownBy(() -> rma.receive(RECEIVED_AT, "W1"))
+            .isInstanceOf(InvalidRmaStateTransitionException.class)
+            .hasMessage( "Invalid RMA state transition from REQUESTED to RECEIVED");
+    }
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)
