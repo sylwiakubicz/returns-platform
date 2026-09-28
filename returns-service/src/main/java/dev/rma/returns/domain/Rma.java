@@ -197,6 +197,7 @@ public final class Rma {
     private void apply(ParcelReceived parcelReceived) {
         this.version += 1;
         this.status = RmaStatus.RECEIVED;
+        this.parcelReceivedAt = parcelReceived.receivedAt();
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {

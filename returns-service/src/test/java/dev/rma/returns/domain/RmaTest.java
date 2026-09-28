@@ -423,7 +423,8 @@ public class RmaTest {
 
         assertAll(
             () -> assertThat(rma.status()).isEqualTo(RmaStatus.RECEIVED),
-            () -> assertThat(rma.version()).isEqualTo(5)
+            () -> assertThat(rma.version()).isEqualTo(5),
+            () -> assertThat(rma.parcelReceivedAt()).isEqualTo(RECEIVED_AT)
         );
     }
 
