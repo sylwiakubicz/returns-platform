@@ -121,6 +121,9 @@ public final class Rma {
     }
 
     public ParcelReceived receive(Instant receivedAt, String werehouseId) {
+        if (status != RmaStatus.IN_TRANSIT) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.RECEIVED);
+        }
         return new ParcelReceived(receivedAt, werehouseId);
     }
 
