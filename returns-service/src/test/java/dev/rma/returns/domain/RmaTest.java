@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.Collection;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
@@ -38,6 +37,9 @@ public class RmaTest {
 
     private static final Instant COLLECTED_AT =
         Instant.parse("2026-09-16T13:00:00Z");
+
+    private static final Instant RECEIVED_AT =
+        Instant.parse("2026-09-17T13:00:00Z");
 
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
@@ -380,6 +382,23 @@ public class RmaTest {
         assertAll(
             () -> assertThat(rma.version()).isEqualTo(4),
             () -> assertThat(rma.status()).isEqualTo(RmaStatus.IN_TRANSIT)
+        );
+    }
+
+    @Test
+    void shouldMarkParcelReceivedFromInTransit() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit()
+        ));
+
+        ParcelReceived parcelReceived = rma.receive(RECEIVED_AT, "W1");
+
+        assertAll(
+            () -> assertThat(parcelReceived.receivedAt()).isEqualTo(RECEIVED_AT),
+            () -> assertThat(parcelReceived.warehouseId()).isEqualTo("W1")
         );
     }
 
