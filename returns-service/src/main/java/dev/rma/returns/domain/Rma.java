@@ -138,6 +138,20 @@ public final class Rma {
         return inspectionStarted;
     }
 
+    public InspectionCompleted completeInspection(
+        String inspectorId,
+        Instant completedAt,
+        List<InspectionResult> results,
+        String approvedBy) {
+        InspectionCompleted inspectionCompleted = new InspectionCompleted(
+            inspectorId,
+            completedAt,
+            results,
+            approvedBy
+        );
+        return inspectionCompleted;
+    }
+
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
 

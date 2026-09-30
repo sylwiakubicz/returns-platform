@@ -1,5 +1,6 @@
 package dev.rma.returns.domain;
 
+import dev.rma.returns.domain.enums.ItemGrade;
 import dev.rma.returns.domain.enums.RmaErrorCode;
 import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
@@ -43,6 +44,9 @@ public class RmaTest {
 
     private static final Instant STARTED_AT =
         Instant.parse("2026-09-18T13:00:00Z");
+
+    private static final Instant COMPLETED_AT =
+        Instant.parse("2026-09-18T15:00:00Z");
 
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
@@ -490,6 +494,34 @@ public class RmaTest {
 
 
     @Test
+    void shouldCompleteInspectionFromUnderInspection() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted()
+        ));
+
+        List<InspectionResult> results = List.of(validInspectionResult());
+
+        InspectionCompleted inspectionCompleted = rma.completeInspection(
+            INSPECTOR_ID,
+            COMPLETED_AT,
+            results,
+            null
+        );
+
+        assertAll(
+            () -> assertThat(inspectionCompleted.inspectorId()).isEqualTo(INSPECTOR_ID),
+            () -> assertThat(inspectionCompleted.completedAt()).isEqualTo(COMPLETED_AT),
+            () -> assertThat(inspectionCompleted.approvedBy()).isNull(),
+            () -> assertThat(inspectionCompleted.results()).isEqualTo(results)
+        );
+    }
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)
@@ -555,6 +587,15 @@ public class RmaTest {
             "book",
             1,
             money
+        );
+    }
+
+    private InspectionResult validInspectionResult() {
+        return new InspectionResult(
+            "item-1",
+            ItemGrade.A,
+            "Item looks good",
+            List.of()
         );
     }
 
