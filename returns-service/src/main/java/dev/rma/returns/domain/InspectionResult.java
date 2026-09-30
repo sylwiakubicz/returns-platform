@@ -16,7 +16,7 @@ public record InspectionResult(
         Objects.requireNonNull(grade, "grade must not be null");
 
         if (note != null && note.length() > 500) {
-            throw new IllegalArgumentException("note can not exceed 500 chars");
+            throw new IllegalArgumentException("note must not exceed 500 characters");
         }
 
         photoKeys = photoKeys == null
