@@ -460,7 +460,15 @@ public class RmaTest {
     }
 
     @Test
-    void shouldRejectInspectionStartingWhenRmaIsNotReceived() {}
+    void shouldRejectInspectionStartingWhenRmaIsNotReceived() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested()
+        ));
+
+        assertThatThrownBy(() -> rma.startInspection(INSPECTOR_ID, STARTED_AT))
+            .isInstanceOf(InvalidRmaStateTransitionException.class)
+            .hasMessage( "Invalid RMA state transition from REQUESTED to UNDER_INSPECTION");
+    }
 
     @Test
     void shouldRebuildUnderInspectionStateFromHistory() {}

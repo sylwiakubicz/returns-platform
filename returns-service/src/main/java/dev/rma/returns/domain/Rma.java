@@ -130,6 +130,9 @@ public final class Rma {
     }
 
     public InspectionStarted startInspection(String inspectorId, Instant startedAt) {
+        if (status != RmaStatus.RECEIVED) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
+        }
         InspectionStarted inspectionStarted = new InspectionStarted(inspectorId, startedAt);
         return inspectionStarted;
     }
