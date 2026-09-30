@@ -471,7 +471,21 @@ public class RmaTest {
     }
 
     @Test
-    void shouldRebuildUnderInspectionStateFromHistory() {}
+    void shouldRebuildUnderInspectionStateFromHistory() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted()
+        ));
+
+        assertAll(
+            () -> assertThat(rma.version()).isEqualTo(6),
+            () -> assertThat(rma.status()).isEqualTo(RmaStatus.UNDER_INSPECTION)
+         );
+    }
 
 
 
@@ -528,6 +542,10 @@ public class RmaTest {
     }
 
     private ParcelReceived validParcelReceived() {return new ParcelReceived(RECEIVED_AT, WAREHAUSE_ID);}
+
+    private InspectionStarted validInspectionStarted() {
+        return new InspectionStarted(INSPECTOR_ID, STARTED_AT);
+    }
 
     private RequestedItem validRequestedItem() {
         Money money = new Money(new BigDecimal("30.00"), PLN);

@@ -134,6 +134,7 @@ public final class Rma {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
         }
         InspectionStarted inspectionStarted = new InspectionStarted(inspectorId, startedAt);
+        apply(inspectionStarted);
         return inspectionStarted;
     }
 
@@ -164,6 +165,7 @@ public final class Rma {
             case PickupScheduled e -> apply(e);
             case ParcelInTransit e -> apply(e);
             case ParcelReceived e -> apply(e);
+            case InspectionStarted e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -206,6 +208,11 @@ public final class Rma {
         this.version += 1;
         this.status = RmaStatus.RECEIVED;
         this.parcelReceivedAt = parcelReceived.receivedAt();
+    }
+
+    private void apply(InspectionStarted inspectionStarted) {
+        this.version += 1;
+        this.status = RmaStatus.UNDER_INSPECTION;
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
