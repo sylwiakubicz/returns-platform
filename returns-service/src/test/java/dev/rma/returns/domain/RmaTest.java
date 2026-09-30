@@ -536,7 +536,25 @@ public class RmaTest {
             .hasMessage("Invalid RMA state transition from REQUESTED to UNDER_INSPECTION");
     }
 
+    @Test
+    void shouldRebuildInspectionCompletedStateFromHistory() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted(),
+            validInspectionCompleted()
+        ));
 
+        assertAll(
+            () -> assertThat(rma.status()).isEqualTo(RmaStatus.UNDER_INSPECTION),
+            () -> assertThat(rma.version()).isEqualTo(7),
+            () -> assertThat(rma.inspectedAt()).isEqualTo(COMPLETED_AT),
+            () -> assertThat(rma.inspectorId()).isEqualTo(INSPECTOR_ID)
+        );
+    }
 
     @Test
     void shouldRejectEmptyHistory() {
@@ -594,6 +612,15 @@ public class RmaTest {
 
     private InspectionStarted validInspectionStarted() {
         return new InspectionStarted(INSPECTOR_ID, STARTED_AT);
+    }
+
+    private InspectionCompleted validInspectionCompleted() {
+        return new InspectionCompleted(
+            INSPECTOR_ID,
+            COMPLETED_AT,
+            List.of(validInspectionResult()),
+            null
+        );
     }
 
     private RequestedItem validRequestedItem() {

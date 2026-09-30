@@ -152,6 +152,8 @@ public final class Rma {
             results,
             approvedBy
         );
+
+        apply(inspectionCompleted);
         return inspectionCompleted;
     }
 
@@ -183,6 +185,7 @@ public final class Rma {
             case ParcelInTransit e -> apply(e);
             case ParcelReceived e -> apply(e);
             case InspectionStarted e -> apply(e);
+            case InspectionCompleted e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -230,6 +233,12 @@ public final class Rma {
     private void apply(InspectionStarted inspectionStarted) {
         this.version += 1;
         this.status = RmaStatus.UNDER_INSPECTION;
+    }
+
+    private void apply(InspectionCompleted inspectionCompleted) {
+        this.version += 1;
+        this.inspectorId = inspectionCompleted.inspectorId();
+        this.inspectedAt = inspectionCompleted.completedAt();
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
