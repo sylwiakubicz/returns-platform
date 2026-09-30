@@ -522,6 +522,23 @@ public class RmaTest {
     }
 
     @Test
+    void shouldRejectInspectionCompletionWhenRmaIsNotUnderInspection() {
+        List<InspectionResult> results = List.of(validInspectionResult());
+        Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
+
+        assertThatThrownBy(() -> rma.completeInspection(
+            INSPECTOR_ID,
+            COMPLETED_AT,
+            results,
+            null
+        ))
+            .isInstanceOf(InvalidRmaStateTransitionException.class)
+            .hasMessage("Invalid RMA state transition from REQUESTED to UNDER_INSPECTION");
+    }
+
+
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)

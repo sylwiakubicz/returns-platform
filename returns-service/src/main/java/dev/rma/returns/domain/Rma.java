@@ -143,6 +143,9 @@ public final class Rma {
         Instant completedAt,
         List<InspectionResult> results,
         String approvedBy) {
+        if (status != RmaStatus.UNDER_INSPECTION) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
+        }
         InspectionCompleted inspectionCompleted = new InspectionCompleted(
             inspectorId,
             completedAt,
