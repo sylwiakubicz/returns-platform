@@ -15,6 +15,7 @@ public record InspectionCompleted(
     public InspectionCompleted {
         Objects.requireNonNull(inspectorId, "inspectorId must not be null");
         Objects.requireNonNull(completedAt, "completedAt must not be null");
+        Objects.requireNonNull(results, "results must not be null");
         results = List.copyOf(results);
     }
 }
