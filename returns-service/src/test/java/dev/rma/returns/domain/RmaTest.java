@@ -237,6 +237,8 @@ public class RmaTest {
             );
     }
 
+
+
     @Test
     void shouldIssueLabelForRequestedRma() {
         RmaRequested rmaRequested = validRmaRequested();
@@ -290,6 +292,8 @@ public class RmaTest {
             );
     }
 
+
+
     @Test
     void shouldSchedulePickupForRmaWithIssuedLabel() {
         Rma rma = Rma.fromHistory( List.of(
@@ -338,6 +342,8 @@ public class RmaTest {
 
 
     }
+
+
 
     @Test
     void shouldMarkParcelInTransitFromLabelIssued() {
@@ -390,6 +396,8 @@ public class RmaTest {
         );
     }
 
+
+
     @Test
     void shouldMarkParcelReceivedFromInTransit() {
         Rma rma = Rma.fromHistory(List.of(
@@ -433,6 +441,32 @@ public class RmaTest {
         );
     }
 
+
+
+    @Test
+    void shouldStartInspectionFromReceived() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived()
+            ));
+
+        InspectionStarted inspectionStarted = rma.startInspection(INSPECTOR_ID, STARTED_AT);
+
+        assertThat(inspectionStarted.inspectorId()).isEqualTo(INSPECTOR_ID);
+        assertThat(inspectionStarted.startedAt()).isEqualTo(STARTED_AT);
+    }
+
+    @Test
+    void shouldRejectInspectionStartingWhenRmaIsNotReceived() {}
+
+    @Test
+    void shouldRebuildUnderInspectionStateFromHistory() {}
+
+
+
     @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
@@ -448,6 +482,8 @@ public class RmaTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("RmaRequested must be the first event");;
     }
+
+
 
     private RmaRequested validRmaRequested() {
         List<RequestedItem> items = List.of(validRequestedItem());

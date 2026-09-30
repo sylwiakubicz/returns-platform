@@ -129,6 +129,11 @@ public final class Rma {
         return parcelReceived;
     }
 
+    public InspectionStarted startInspection(String inspectorId, Instant startedAt) {
+        InspectionStarted inspectionStarted = new InspectionStarted(inspectorId, startedAt);
+        return inspectionStarted;
+    }
+
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
 
