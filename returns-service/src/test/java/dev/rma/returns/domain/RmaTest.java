@@ -41,6 +41,9 @@ public class RmaTest {
     private static final Instant RECEIVED_AT =
         Instant.parse("2026-09-17T13:00:00Z");
 
+    private static final Instant STARTED_AT =
+        Instant.parse("2026-09-18T13:00:00Z");
+
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
     private static final String CUSTOMER_ID = "customer-1";
@@ -50,6 +53,8 @@ public class RmaTest {
     private static final String LABEL_FILE_KEY = "key";
 
     private static final String PICKUP_ID = "pickup-id-1";
+    private static final String WAREHAUSE_ID = "warehause-1";
+    private static final String INSPECTOR_ID = "inspector-1";
 
     private static final Currency PLN = Currency.getInstance("PLN");
     private static final Currency EUR = Currency.getInstance("EUR");
@@ -394,11 +399,11 @@ public class RmaTest {
             validParcelInTransit()
         ));
 
-        ParcelReceived parcelReceived = rma.receive(RECEIVED_AT, "W1");
+        ParcelReceived parcelReceived = rma.receive(RECEIVED_AT, WAREHAUSE_ID);
 
         assertAll(
             () -> assertThat(parcelReceived.receivedAt()).isEqualTo(RECEIVED_AT),
-            () -> assertThat(parcelReceived.warehouseId()).isEqualTo("W1")
+            () -> assertThat(parcelReceived.warehouseId()).isEqualTo(WAREHAUSE_ID)
         );
     }
 
@@ -406,7 +411,7 @@ public class RmaTest {
     void shouldRejectParcelReceivedWhenRmaIsNotInTransit() {
         Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
 
-        assertThatThrownBy(() -> rma.receive(RECEIVED_AT, "W1"))
+        assertThatThrownBy(() -> rma.receive(RECEIVED_AT, WAREHAUSE_ID))
             .isInstanceOf(InvalidRmaStateTransitionException.class)
             .hasMessage( "Invalid RMA state transition from REQUESTED to RECEIVED");
     }
@@ -478,7 +483,7 @@ public class RmaTest {
         return new ParcelInTransit(COLLECTED_AT);
     }
 
-    private ParcelReceived validParcelReceived() {return new ParcelReceived(RECEIVED_AT, "W1");}
+    private ParcelReceived validParcelReceived() {return new ParcelReceived(RECEIVED_AT, WAREHAUSE_ID);}
 
     private RequestedItem validRequestedItem() {
         Money money = new Money(new BigDecimal("30.00"), PLN);
