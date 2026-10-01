@@ -5,5 +5,6 @@ public enum RmaErrorCode {
     NO_ITEMS,
     INVALID_QUANTITY,
     MIXED_CURRENCIES,
+    INCOMPLETE_INSPECTION,
     UNKNOWN_REASON
 }

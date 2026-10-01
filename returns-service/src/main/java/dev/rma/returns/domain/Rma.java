@@ -146,6 +146,8 @@ public final class Rma {
         if (status != RmaStatus.UNDER_INSPECTION) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
         }
+        validateCompletion(results);
+
         InspectionCompleted inspectionCompleted = new InspectionCompleted(
             inspectorId,
             completedAt,
@@ -307,6 +309,17 @@ public final class Rma {
                     RmaErrorCode.MIXED_CURRENCIES,
                     "Mixed currencies are forbidden"
                 );
+            }
+        }
+    }
+
+    private void validateCompletion(List<InspectionResult> results) {
+        if (this.items.size() != results.size()) {
+            throw new RmaDomainException(RmaErrorCode.INCOMPLETE_INSPECTION, "All items must be checked");
+        }
+        for (RmaItem item : this.items) {
+            if (results.stream().noneMatch(r -> Objects.equals(r.itemId(), item.itemId()))) {
+                throw new RmaDomainException(RmaErrorCode.INCOMPLETE_INSPECTION, "All items must be checked");
             }
         }
     }

@@ -579,7 +579,35 @@ public class RmaTest {
 
     }
 
+    @Test
+    void shouldRejectIncompleteInspection() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted()
+        ));
 
+        assertThatThrownBy(() -> rma.completeInspection(
+            INSPECTOR_ID,
+            COMPLETED_AT,
+            List.of(new InspectionResult("item-2", ItemGrade.A, "note", List.of())),
+            null
+        ))
+            .isInstanceOf(RmaDomainException.class)
+            .satisfies(exception ->
+                assertThat(((RmaDomainException) exception).code())
+                    .isEqualTo(RmaErrorCode.INCOMPLETE_INSPECTION)
+            );
+    }
+//
+//    shouldRequireSupervisorApprovalForExpensiveRejectedItem()
+//
+//    shouldAllowExpensiveRejectedItemWithSupervisorApproval()
+//
+//    shouldAllowInspectionWithoutPhotos()
 
     @Test
     void shouldRejectEmptyHistory() {
