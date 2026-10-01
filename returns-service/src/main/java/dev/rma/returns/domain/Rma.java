@@ -239,6 +239,18 @@ public final class Rma {
         this.version += 1;
         this.inspectorId = inspectionCompleted.inspectorId();
         this.inspectedAt = inspectionCompleted.completedAt();
+
+        this.items = this.items.stream()
+            .map( item -> {
+                    InspectionResult result = inspectionCompleted.results().stream()
+                    .filter(r -> r. itemId().equals(item.itemId()))
+                    .findFirst()
+                    .orElseThrow();
+
+                    return item.withInspection(result);
+                }
+            )
+            .toList();
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {

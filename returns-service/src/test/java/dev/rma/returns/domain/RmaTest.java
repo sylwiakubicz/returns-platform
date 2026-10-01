@@ -557,6 +557,31 @@ public class RmaTest {
     }
 
     @Test
+    void shouldApplyInspectionResultsToRmaItems() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted(),
+            validInspectionCompleted()
+        ));
+
+        RmaItem item = rma.items().getFirst();
+        InspectionResult inspectionResult = validInspectionResult();
+
+        assertAll(
+            () -> assertThat(item.grade()).isEqualTo(inspectionResult.grade()),
+            () -> assertThat(item.inspectionNote()).isEqualTo(inspectionResult.note()),
+            () -> assertThat(item.photoKeys()).isEqualTo(inspectionResult.photoKeys())
+        );
+
+    }
+
+
+
+    @Test
     void shouldRejectEmptyHistory() {
         assertThatThrownBy(() -> Rma.fromHistory(List.of()))
             .isInstanceOf(IllegalArgumentException.class)
