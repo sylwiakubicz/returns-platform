@@ -21,6 +21,7 @@ public record RefundDecided(
         Objects.requireNonNull(refundAmount, "refundAmount must not be null");
         Objects.requireNonNull(deductionTotal, "deductionTotal must not be null");
         Objects.requireNonNull(decidedAt, "decidedAt must not be null");
+        Objects.requireNonNull(itemDecisions, "itemDecisions must not be null");
 
         if (decision == RefundDecision.REJECTED
             && (rejectionReason == null || rejectionReason.isBlank())) {
