@@ -5,13 +5,11 @@ import dev.rma.returns.domain.events.*;
 import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.Currency;
-import java.util.List;
-import java.util.Objects;
-import java.util.UUID;
+import java.util.*;
 
 public final class Rma {
     private UUID rmaId;
@@ -147,7 +145,7 @@ public final class Rma {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
         }
         validateCompletion(results);
-
+        validateApproval(results, approvedBy);
         InspectionCompleted inspectionCompleted = new InspectionCompleted(
             inspectorId,
             completedAt,
@@ -322,6 +320,22 @@ public final class Rma {
                 throw new RmaDomainException(RmaErrorCode.INCOMPLETE_INSPECTION, "All items must be checked");
             }
         }
+    }
+
+    private void validateApproval(List<InspectionResult> results, String approvedBy) {
+        results.forEach(result -> {
+            RmaItem item = this.items.stream()
+                .filter(i -> i.itemId().equals(result.itemId()))
+                .findFirst()
+                .orElseThrow();
+
+                if (result.grade() == ItemGrade.D
+                    && approvedBy == null
+                    && item.totalValue().compareTo(new BigDecimal(500)) > 0) {
+                    throw new RmaDomainException(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED,
+                        "Supervisor approval required");
+                }
+        });
     }
 
     public UUID rmaId() {

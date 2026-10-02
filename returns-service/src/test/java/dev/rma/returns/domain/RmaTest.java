@@ -602,8 +602,49 @@ public class RmaTest {
                     .isEqualTo(RmaErrorCode.INCOMPLETE_INSPECTION)
             );
     }
-//
-//    shouldRequireSupervisorApprovalForExpensiveRejectedItem()
+
+    @Test
+    void shouldRequireSupervisorApprovalForExpensiveRejectedItem() {
+        Money money = new Money(new BigDecimal("550.00"), PLN);
+        List<RequestedItem> items = List.of(new RequestedItem(
+            "item-1",
+            "sku-1",
+            "book",
+            1,
+            money
+        )) ;
+        Rma rma = Rma.fromHistory(List.of(
+            new RmaRequested(
+                RMA_ID,
+                BUSINESS_NUMBER,
+                ORDER_ID,
+                CUSTOMER_ID,
+                DELIVERED_AT,
+                REQUESTED_AT,
+                RmaReason.CHANGED_MIND,
+                "Nie pasuje",
+                PLN,
+                items
+            ),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted()
+        ));
+
+        assertThatThrownBy(() -> rma.completeInspection(
+            INSPECTOR_ID,
+            COMPLETED_AT,
+            List.of(new InspectionResult("item-1", ItemGrade.D, "note", List.of())),
+            null
+        ))
+            .isInstanceOf(RmaDomainException.class)
+            .satisfies(exception ->
+                assertThat(((RmaDomainException) exception).code())
+                    .isEqualTo(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED)
+            );
+    }
 //
 //    shouldAllowExpensiveRejectedItemWithSupervisorApproval()
 //

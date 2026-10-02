@@ -2,6 +2,7 @@ package dev.rma.returns.domain;
 
 import dev.rma.returns.domain.enums.ItemGrade;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
 
@@ -87,5 +88,9 @@ public record RmaItem(
             decision.deductionPercent(),
             decision.refundableAmount()
         );
+    }
+
+    public BigDecimal totalValue() {
+        return unitPrice.amount().multiply(new BigDecimal(quantity));
     }
 }
