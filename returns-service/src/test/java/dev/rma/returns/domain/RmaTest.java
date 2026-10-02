@@ -690,8 +690,36 @@ public class RmaTest {
             () -> assertThat(rma.version()).isEqualTo(7)
         );
     }
-//
-//    shouldAllowInspectionWithoutPhotos()
+
+    @Test
+    void shouldAllowInspectionWithoutPhotos() {
+        Rma rma = Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted()
+        ));
+
+        InspectionCompleted event = rma.completeInspection(
+            INSPECTOR_ID,
+            COMPLETED_AT,
+            List.of(new InspectionResult(
+                "item-1",
+                ItemGrade.A,
+                "note",
+                List.of()
+            )),
+            null
+        );
+
+        assertAll(
+            () -> assertThat(event.results().getFirst().photoKeys()).isEmpty(),
+            () -> assertThat(rma.items().getFirst().photoKeys()).isEmpty()
+        );
+    }
+
 
     @Test
     void shouldRejectEmptyHistory() {
