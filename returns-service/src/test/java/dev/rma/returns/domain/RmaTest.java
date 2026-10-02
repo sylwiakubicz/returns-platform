@@ -59,6 +59,7 @@ public class RmaTest {
     private static final String PICKUP_ID = "pickup-id-1";
     private static final String WAREHAUSE_ID = "warehause-1";
     private static final String INSPECTOR_ID = "inspector-1";
+    private static final String SUPERVISOR_ID = "supervisor-1";
 
     private static final Currency PLN = Currency.getInstance("PLN");
     private static final Currency EUR = Currency.getInstance("EUR");
@@ -645,8 +646,50 @@ public class RmaTest {
                     .isEqualTo(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED)
             );
     }
-//
-//    shouldAllowExpensiveRejectedItemWithSupervisorApproval()
+
+    @Test
+    void shouldAllowExpensiveRejectedItemWithSupervisorApproval() {
+        Money money = new Money(new BigDecimal("550.00"), PLN);
+        List<RequestedItem> items = List.of(new RequestedItem(
+            "item-1",
+            "sku-1",
+            "book",
+            1,
+            money
+        )) ;
+        Rma rma = Rma.fromHistory(List.of(
+            new RmaRequested(
+                RMA_ID,
+                BUSINESS_NUMBER,
+                ORDER_ID,
+                CUSTOMER_ID,
+                DELIVERED_AT,
+                REQUESTED_AT,
+                RmaReason.CHANGED_MIND,
+                "Nie pasuje",
+                PLN,
+                items
+            ),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted()
+        ));
+
+        InspectionCompleted event = rma.completeInspection(
+            INSPECTOR_ID,
+            COMPLETED_AT,
+            List.of(new InspectionResult("item-1", ItemGrade.D, "note", List.of())),
+            SUPERVISOR_ID
+        );
+
+        assertAll(
+            () -> assertThat(event.approvedBy()).isEqualTo(SUPERVISOR_ID),
+            () -> assertThat(event.results()).hasSize(1),
+            () -> assertThat(rma.version()).isEqualTo(7)
+        );
+    }
 //
 //    shouldAllowInspectionWithoutPhotos()
 
