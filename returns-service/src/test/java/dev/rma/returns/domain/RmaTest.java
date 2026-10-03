@@ -753,7 +753,22 @@ public class RmaTest {
 
     @Nested
     class RefundDecisionTests {
+        @Test
+        void shouldDecideFullRefundWhenNoItemHasGradeD() {
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted()
+            ));
 
+            RefundDecided refundDecided =  rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+            assertThat(refundDecided.decision()).isEqualTo(RefundDecision.FULL);
+        }
     }
 
     @Nested
@@ -775,9 +790,10 @@ public class RmaTest {
         }
     }
 
-    private RmaRequested validRmaRequested() {
-        List<RequestedItem> items = List.of(validRequestedItem());
-
+    private RmaRequested validRmaRequested(
+        RmaReason reason,
+        List<RequestedItem> items
+    ) {
         return new RmaRequested(
             RMA_ID,
             BUSINESS_NUMBER,
@@ -785,11 +801,16 @@ public class RmaTest {
             CUSTOMER_ID,
             DELIVERED_AT,
             REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
+            reason,
             "Nie pasuje",
             PLN,
             items
         );
+    }
+
+    private RmaRequested validRmaRequested() {
+        List<RequestedItem> items = List.of(validRequestedItem());
+        return validRmaRequested(RmaReason.CHANGED_MIND, items);
     }
 
     private PickupScheduled validPickupScheduled() {
@@ -809,19 +830,27 @@ public class RmaTest {
         return new ParcelInTransit(COLLECTED_AT);
     }
 
-    private ParcelReceived validParcelReceived() {return new ParcelReceived(RECEIVED_AT, WAREHOUSE_ID);}
+    private ParcelReceived validParcelReceived() {
+        return new ParcelReceived(RECEIVED_AT, WAREHOUSE_ID);
+    }
 
     private InspectionStarted validInspectionStarted() {
         return new InspectionStarted(INSPECTOR_ID, STARTED_AT);
     }
 
-    private InspectionCompleted validInspectionCompleted() {
+    private InspectionCompleted validInspectionCompleted(
+        List<InspectionResult> results
+    ) {
         return new InspectionCompleted(
             INSPECTOR_ID,
             COMPLETED_AT,
-            List.of(validInspectionResult()),
+            results,
             null
         );
+    }
+
+    private InspectionCompleted validInspectionCompleted() {
+        return validInspectionCompleted(List.of(validInspectionResult()));
     }
 
     private RequestedItem validRequestedItem() {
