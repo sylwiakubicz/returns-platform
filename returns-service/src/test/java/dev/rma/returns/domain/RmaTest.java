@@ -775,7 +775,6 @@ public class RmaTest {
         }
     }
 
-
     private RmaRequested validRmaRequested() {
         List<RequestedItem> items = List.of(validRequestedItem());
 
