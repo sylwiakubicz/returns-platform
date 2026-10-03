@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
@@ -84,7 +85,7 @@ public class RmaTest {
 
 
     @Nested
-    class RequestRmaTests {
+    class RequestTests {
         @Test
         void shouldCreateRequestedRma() {
             List<RequestedItem> items = List.of(validRequestedItem());
@@ -118,13 +119,10 @@ public class RmaTest {
 
         @Test
         void shouldRebuildRequestedStateFromRmaRequestedEvent() {
-            // given
             RmaRequested event = validRmaRequested();
 
-            // when
             Rma rma = Rma.fromHistory(List.of(event));
 
-            // then
             assertAll(
                 () -> assertThat(rma.status()).isEqualTo(RmaStatus.REQUESTED),
                 () -> assertThat(rma.version()).isEqualTo(1),
@@ -136,12 +134,13 @@ public class RmaTest {
             );
 
             assertThat(rma.items()).hasSize(1);
+            RequestedItem requestedItem = event.items().getFirst();
             RmaItem item = rma.items().getFirst();
             assertAll(
-                () -> assertThat(item.itemId()).isEqualTo("item-1"),
-                () -> assertThat(item.sku()).isEqualTo("sku-1"),
-                () -> assertThat(item.name()).isEqualTo("book"),
-                () -> assertThat(item.unitPrice()).isEqualTo(new Money(new BigDecimal("30.00"), PLN)),
+                () -> assertThat(item.itemId()).isEqualTo(requestedItem.itemId()),
+                () -> assertThat(item.sku()).isEqualTo(requestedItem.sku()),
+                () -> assertThat(item.name()).isEqualTo(requestedItem.name()),
+                () -> assertThat(item.unitPrice()).isEqualTo(requestedItem.unitPrice()),
                 () -> assertThat(item.grade()).isNull(),
                 () -> assertThat(item.inspectionNote()).isNull(),
                 () -> assertThat(item.photoKeys()).isEmpty(),
@@ -152,7 +151,9 @@ public class RmaTest {
 
         @Test
         void shouldRejectRequestWhenReturnWindowExpired() {
-            Instant requestedAt = Instant.parse("2026-09-16T12:00:00Z");
+            Instant deliveredAt = Instant.parse("2026-09-01T12:00:00Z");
+            Instant requestedAt = deliveredAt
+                .plus(RETURN_WINDOW_DAYS + 1, ChronoUnit.DAYS);
             List<RequestedItem> items = List.of(validRequestedItem());
 
             assertThatThrownBy(() -> Rma.request(
@@ -160,7 +161,7 @@ public class RmaTest {
                 BUSINESS_NUMBER,
                 ORDER_ID,
                 CUSTOMER_ID,
-                DELIVERED_AT,
+                deliveredAt,
                 RmaReason.CHANGED_MIND,
                 "Nie pasuje",
                 items,
@@ -168,16 +169,18 @@ public class RmaTest {
                 requestedAt,
                 RETURN_WINDOW_DAYS
             ))
-                .isInstanceOf(RmaDomainException.class)
-                .satisfies(exception ->
-                    assertThat(((RmaDomainException) exception).code())
+                .isInstanceOfSatisfying(
+                    RmaDomainException.class,
+                    exception -> assertThat(exception.code())
                         .isEqualTo(RmaErrorCode.RETURN_WINDOW_EXPIRED)
                 );
         }
 
         @Test
         void shouldAcceptRequestOnLastDayOfReturnWindow() {
-            Instant requestedAt = Instant.parse("2026-09-15T12:00:00Z");
+            Instant deliveredAt = Instant.parse("2026-09-01T12:00:00Z");
+            Instant requestedAt = deliveredAt
+                .plus(RETURN_WINDOW_DAYS, ChronoUnit.DAYS);
             List<RequestedItem> items = List.of(validRequestedItem());
 
             RmaRequested event = Rma.request(
@@ -185,7 +188,7 @@ public class RmaTest {
                 BUSINESS_NUMBER,
                 ORDER_ID,
                 CUSTOMER_ID,
-                DELIVERED_AT,
+                deliveredAt,
                 RmaReason.CHANGED_MIND,
                 "Nie pasuje",
                 items,
@@ -215,29 +218,16 @@ public class RmaTest {
                 RETURN_WINDOW_DAYS
             )).isInstanceOfSatisfying(
                 RmaDomainException.class,
-                exception -> assertThat(((RmaDomainException) exception).code())
+                exception -> assertThat(exception.code())
                     .isEqualTo(RmaErrorCode.NO_ITEMS)
             );
         }
 
         @Test
         void shouldRejectRequestWithMixedCurrencies() {
-            Money moneyPln = new Money(new BigDecimal("30.00"), PLN);
-            Money moneyEur = new Money(new BigDecimal("30.00"), EUR);
-
             List<RequestedItem> items = List.of(
-                new RequestedItem(
-                    "item-1",
-                    "sku-1",
-                    "book-1",
-                    1,
-                    moneyEur),
-                new RequestedItem(
-                    "item-2",
-                    "sku-2",
-                    "book-2",
-                    1,
-                    moneyPln)
+                validRequestedItem("1", PLN),
+                validRequestedItem("2", EUR)
             );
 
             assertThatThrownBy(() -> Rma.request(
@@ -853,15 +843,21 @@ public class RmaTest {
         return validInspectionCompleted(List.of(validInspectionResult()));
     }
 
-    private RequestedItem validRequestedItem() {
-        Money money = new Money(new BigDecimal("30.00"), PLN);
+    private RequestedItem validRequestedItem(
+        String itemId,
+        Currency currency
+    ) {
         return new RequestedItem(
-            "item-1",
-            "sku-1",
+            itemId,
+            "sku-" + itemId,
             "book",
             1,
-            money
+            new Money(new BigDecimal("30.00"), currency)
         );
+    }
+
+    private RequestedItem validRequestedItem() {
+        return validRequestedItem("1", PLN);
     }
 
     private InspectionResult validInspectionResult() {
