@@ -4,6 +4,8 @@ import dev.rma.returns.domain.enums.*;
 import dev.rma.returns.domain.events.*;
 import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
+import dev.rma.returns.domain.policy.InspectionPolicy;
+import dev.rma.returns.domain.policy.RefundPolicy;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -141,12 +143,13 @@ public final class Rma {
         String inspectorId,
         Instant completedAt,
         List<InspectionResult> results,
-        String approvedBy) {
+        String approvedBy,
+        InspectionPolicy policy) {
         if (status != RmaStatus.UNDER_INSPECTION) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
         }
         validateCompletion(results);
-        validateApproval(results, approvedBy);
+        validateApproval(results, approvedBy, policy);
         InspectionCompleted inspectionCompleted = new InspectionCompleted(
             inspectorId,
             completedAt,
@@ -160,18 +163,13 @@ public final class Rma {
 
     public RefundDecided decideRefund(
         Instant decidedAt,
-        int gradeAPercent,
-        int gradeBPercent,
-        int gradeCPercent,
-        BigDecimal returnShippingFee
+        RefundPolicy policy
     ) {
 
         List<ItemRefundDecision> itemDecisions = this.items.stream()
             .map(item -> calculateItemRefundDecision(
                 item,
-                gradeAPercent,
-                gradeBPercent,
-                gradeCPercent
+                policy
             ))
             .toList();
 
@@ -179,7 +177,7 @@ public final class Rma {
 
         BigDecimal shippingFee = calculateShippingFee(
             sumItems,
-            returnShippingFee
+            policy
         );
 
         BigDecimal refundAmount = sumItems
@@ -187,9 +185,7 @@ public final class Rma {
             .max(BigDecimal.ZERO);
 
         BigDecimal deductionTotal = calculateDeductionTotal(
-            gradeAPercent,
-            gradeBPercent,
-            gradeCPercent,
+            policy,
             shippingFee
         );
 
@@ -405,7 +401,7 @@ public final class Rma {
         }
     }
 
-    private void validateApproval(List<InspectionResult> results, String approvedBy) {
+    private void validateApproval(List<InspectionResult> results, String approvedBy, InspectionPolicy policy) {
         results.forEach(result -> {
             RmaItem item = this.items.stream()
                 .filter(i -> i.itemId().equals(result.itemId()))
@@ -414,7 +410,7 @@ public final class Rma {
 
                 if (result.grade() == ItemGrade.D
                     && approvedBy == null
-                    && item.totalValue().compareTo(new BigDecimal(500)) > 0) {
+                    && item.totalValue().compareTo(policy.supervisorApprovalThreshold()) > 0) {
                     throw new RmaDomainException(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED,
                         "Supervisor approval required");
                 }
@@ -423,15 +419,11 @@ public final class Rma {
 
     private ItemRefundDecision calculateItemRefundDecision(
         RmaItem item,
-        int gradeAPercent,
-        int gradeBPercent,
-        int gradeCPercent
+        RefundPolicy policy
     ) {
         int deductionPercent = calculateDeductionPercent(
             item,
-            gradeAPercent,
-            gradeBPercent,
-            gradeCPercent
+            policy
         );
 
         BigDecimal refundableAmount = calculateRefundableAmount(
@@ -449,18 +441,16 @@ public final class Rma {
 
     private int calculateDeductionPercent(
         RmaItem item,
-        int gradeAPercent,
-        int gradeBPercent,
-        int gradeCPercent
+        RefundPolicy policy
     ) {
         if (this.reason != RmaReason.CHANGED_MIND) {
             return 0;
         }
 
         return switch (item.grade()) {
-            case A -> gradeAPercent;
-            case B -> gradeBPercent;
-            case C -> gradeCPercent;
+            case A -> policy.gradeAPercent();
+            case B -> policy.gradeBPercent();
+            case C -> policy.gradeCPercent();
             case D -> 0;
         };
     }
@@ -504,29 +494,25 @@ public final class Rma {
 
     private BigDecimal calculateShippingFee(
         BigDecimal sumItems,
-        BigDecimal returnShippingFee
+        RefundPolicy policy
     ) {
         if (this.reason == RmaReason.CHANGED_MIND
             && sumItems.compareTo(BigDecimal.ZERO) > 0) {
-            return returnShippingFee;
+            return policy.returnShippingFee();
         }
 
         return BigDecimal.ZERO;
     }
 
     private BigDecimal calculateDeductionTotal(
-        int gradeAPercent,
-        int gradeBPercent,
-        int gradeCPercent,
+        RefundPolicy policy,
         BigDecimal shippingFee
     ) {
         BigDecimal itemDeductions = this.items.stream()
             .map(item -> {
                 int deductionPercent = calculateDeductionPercent(
                     item,
-                    gradeAPercent,
-                    gradeBPercent,
-                    gradeCPercent
+                    policy
                 );
 
                 return calculateItemDeduction(

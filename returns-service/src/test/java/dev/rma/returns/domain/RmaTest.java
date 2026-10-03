@@ -1,12 +1,11 @@
 package dev.rma.returns.domain;
 
-import dev.rma.returns.domain.enums.ItemGrade;
-import dev.rma.returns.domain.enums.RmaErrorCode;
-import dev.rma.returns.domain.enums.RmaReason;
-import dev.rma.returns.domain.enums.RmaStatus;
+import dev.rma.returns.domain.enums.*;
 import dev.rma.returns.domain.events.*;
 import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
+import dev.rma.returns.domain.policy.InspectionPolicy;
+import dev.rma.returns.domain.policy.RefundPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -20,6 +19,19 @@ import static org.assertj.core.api.Assertions.*;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
 public class RmaTest {
+
+    private static final RefundPolicy REFUND_POLICY =
+        new RefundPolicy(
+            0,
+            15,
+            40,
+            new BigDecimal("15.00")
+        );
+
+    private static final InspectionPolicy INSPECTION_POLICY =
+        new InspectionPolicy(
+            new BigDecimal("500.00")
+        );
 
     private static final UUID RMA_ID =
         UUID.fromString("018f0000-0000-7000-8000-000000000001");
@@ -511,7 +523,8 @@ public class RmaTest {
             INSPECTOR_ID,
             COMPLETED_AT,
             results,
-            null
+            null,
+            INSPECTION_POLICY
         );
 
         assertAll(
@@ -531,7 +544,8 @@ public class RmaTest {
             INSPECTOR_ID,
             COMPLETED_AT,
             results,
-            null
+            null,
+            INSPECTION_POLICY
         ))
             .isInstanceOf(InvalidRmaStateTransitionException.class)
             .hasMessage("Invalid RMA state transition from REQUESTED to UNDER_INSPECTION");
@@ -595,7 +609,8 @@ public class RmaTest {
             INSPECTOR_ID,
             COMPLETED_AT,
             List.of(new InspectionResult("item-2", ItemGrade.A, "note", List.of())),
-            null
+            null,
+            INSPECTION_POLICY
         ))
             .isInstanceOf(RmaDomainException.class)
             .satisfies(exception ->
@@ -638,7 +653,8 @@ public class RmaTest {
             INSPECTOR_ID,
             COMPLETED_AT,
             List.of(new InspectionResult("item-1", ItemGrade.D, "note", List.of())),
-            null
+            null,
+            INSPECTION_POLICY
         ))
             .isInstanceOf(RmaDomainException.class)
             .satisfies(exception ->
@@ -681,7 +697,8 @@ public class RmaTest {
             INSPECTOR_ID,
             COMPLETED_AT,
             List.of(new InspectionResult("item-1", ItemGrade.D, "note", List.of())),
-            SUPERVISOR_ID
+            SUPERVISOR_ID,
+            INSPECTION_POLICY
         );
 
         assertAll(
@@ -711,7 +728,8 @@ public class RmaTest {
                 "note",
                 List.of()
             )),
-            null
+            null,
+            INSPECTION_POLICY
         );
 
         assertAll(
@@ -736,7 +754,6 @@ public class RmaTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage("RmaRequested must be the first event");;
     }
-
 
 
     private RmaRequested validRmaRequested() {
