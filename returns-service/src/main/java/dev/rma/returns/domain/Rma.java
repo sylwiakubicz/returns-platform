@@ -6,6 +6,7 @@ import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -157,6 +158,67 @@ public final class Rma {
         return inspectionCompleted;
     }
 
+    public RefundDecided decideRefund(
+        Instant decidedAt,
+        int gradeAPercent,
+        int gradeBPercent,
+        int gradeCPercent,
+        BigDecimal returnShippingFee
+    ) {
+
+        List<ItemRefundDecision> itemDecisions = this.items.stream()
+            .map(item -> calculateItemRefundDecision(
+                item,
+                gradeAPercent,
+                gradeBPercent,
+                gradeCPercent
+            ))
+            .toList();
+
+        BigDecimal sumItems = calculateSumItems(itemDecisions);
+
+        BigDecimal shippingFee = calculateShippingFee(
+            sumItems,
+            returnShippingFee
+        );
+
+        BigDecimal refundAmount = sumItems
+            .subtract(shippingFee)
+            .max(BigDecimal.ZERO);
+
+        BigDecimal deductionTotal = calculateDeductionTotal(
+            gradeAPercent,
+            gradeBPercent,
+            gradeCPercent,
+            shippingFee
+        );
+
+
+        RefundDecision decision = determineRefundDecision(
+            this.items,
+            refundAmount
+        );
+
+        String rejectionReason = determineRejectionReason(
+            decision,
+            refundAmount
+        );
+
+        RefundDecided event = new RefundDecided(
+            decision,
+            new Money(refundAmount, this.currency),
+            new Money(deductionTotal, this.currency),
+            itemDecisions,
+            rejectionReason,
+            decidedAt
+        );
+
+        apply(event);
+
+        return event;
+    }
+
+
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
 
@@ -186,6 +248,7 @@ public final class Rma {
             case ParcelReceived e -> apply(e);
             case InspectionStarted e -> apply(e);
             case InspectionCompleted e -> apply(e);
+            case RefundDecided e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -250,6 +313,26 @@ public final class Rma {
                     return item.withInspection(result);
                 }
             )
+            .toList();
+    }
+
+    private void apply(RefundDecided refundDecided) {
+        this.version += 1;
+        this.status = refundDecided.decision() == RefundDecision.REJECTED
+            ? RmaStatus.REJECTED
+            : RmaStatus.REFUND_PENDING;
+
+        this.refundAmount = refundDecided.refundAmount();
+        this.deductionTotal = refundDecided.deductionTotal();
+        this.items = this.items.stream()
+            .map(item -> {
+                ItemRefundDecision itemRefundDecision = refundDecided.itemDecisions().stream()
+                    .filter(decision -> decision.itemId().equals(item.itemId()))
+                    .findFirst()
+                    .orElseThrow();
+
+                return item.withRefundDecision(itemRefundDecision);
+            })
             .toList();
     }
 
@@ -336,6 +419,169 @@ public final class Rma {
                         "Supervisor approval required");
                 }
         });
+    }
+
+    private ItemRefundDecision calculateItemRefundDecision(
+        RmaItem item,
+        int gradeAPercent,
+        int gradeBPercent,
+        int gradeCPercent
+    ) {
+        int deductionPercent = calculateDeductionPercent(
+            item,
+            gradeAPercent,
+            gradeBPercent,
+            gradeCPercent
+        );
+
+        BigDecimal refundableAmount = calculateRefundableAmount(
+            item,
+            deductionPercent
+        );
+
+        return new ItemRefundDecision(
+            item.itemId(),
+            item.grade(),
+            deductionPercent,
+            new Money(refundableAmount, this.currency)
+        );
+    }
+
+    private int calculateDeductionPercent(
+        RmaItem item,
+        int gradeAPercent,
+        int gradeBPercent,
+        int gradeCPercent
+    ) {
+        if (this.reason != RmaReason.CHANGED_MIND) {
+            return 0;
+        }
+
+        return switch (item.grade()) {
+            case A -> gradeAPercent;
+            case B -> gradeBPercent;
+            case C -> gradeCPercent;
+            case D -> 0;
+        };
+    }
+
+    private BigDecimal calculateRefundableAmount(
+        RmaItem item,
+        int deductionPercent
+    ) {
+        if (item.grade() == ItemGrade.D) {
+            return new BigDecimal("0.00");
+        }
+
+        BigDecimal deduction = calculateItemDeduction(
+            item,
+            deductionPercent
+        );
+
+        return item.totalValue()
+            .subtract(deduction)
+            .setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateItemDeduction(
+        RmaItem item,
+        int deductionPercent
+    ) {
+        return item.totalValue()
+            .multiply(BigDecimal.valueOf(deductionPercent))
+            .divide(BigDecimal.valueOf(100))
+            .setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateSumItems(
+        List<ItemRefundDecision> itemDecisions
+    ) {
+        return itemDecisions.stream()
+            .map(ItemRefundDecision::refundableAmount)
+            .map(Money::amount)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private BigDecimal calculateShippingFee(
+        BigDecimal sumItems,
+        BigDecimal returnShippingFee
+    ) {
+        if (this.reason == RmaReason.CHANGED_MIND
+            && sumItems.compareTo(BigDecimal.ZERO) > 0) {
+            return returnShippingFee;
+        }
+
+        return BigDecimal.ZERO;
+    }
+
+    private BigDecimal calculateDeductionTotal(
+        int gradeAPercent,
+        int gradeBPercent,
+        int gradeCPercent,
+        BigDecimal shippingFee
+    ) {
+        BigDecimal itemDeductions = this.items.stream()
+            .map(item -> {
+                int deductionPercent = calculateDeductionPercent(
+                    item,
+                    gradeAPercent,
+                    gradeBPercent,
+                    gradeCPercent
+                );
+
+                return calculateItemDeduction(
+                    item,
+                    deductionPercent
+                );
+            })
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return itemDeductions.add(shippingFee);
+    }
+
+    private RefundDecision determineRefundDecision(
+        List<RmaItem> items,
+        BigDecimal refundAmount
+    ) {
+        if (refundAmount.compareTo(BigDecimal.ZERO) == 0) {
+            return RefundDecision.REJECTED;
+        }
+
+        long itemsWithGradeD = items.stream()
+            .filter(item -> item.grade() == ItemGrade.D)
+            .count();
+
+        if (itemsWithGradeD == 0) {
+            return RefundDecision.FULL;
+        }
+
+        if (itemsWithGradeD == items.size()) {
+            return RefundDecision.REJECTED;
+        }
+
+        return RefundDecision.PARTIAL;
+    }
+
+    private String determineRejectionReason(
+        RefundDecision decision,
+        BigDecimal refundAmount
+    ) {
+        if (decision != RefundDecision.REJECTED) {
+            return null;
+        }
+
+        boolean allItemsRejected = this.items.stream()
+            .allMatch(item -> item.grade() == ItemGrade.D);
+
+        if (allItemsRejected) {
+            return "All items rejected after inspection";
+        }
+
+        if (refundAmount.compareTo(BigDecimal.ZERO) == 0) {
+            return "Refund amount is zero";
+        }
+
+        return "Refund rejected";
     }
 
     public UUID rmaId() {
