@@ -226,8 +226,8 @@ public class RmaTest {
         @Test
         void shouldRejectRequestWithMixedCurrencies() {
             List<RequestedItem> items = List.of(
-                validRequestedItem("1", PLN),
-                validRequestedItem("2", EUR)
+                validRequestedItem("1", PLN, "30.00"),
+                validRequestedItem("2", EUR, "30.00")
             );
 
             assertThatThrownBy(() -> Rma.request(
@@ -255,35 +255,35 @@ public class RmaTest {
     class LabelTests {
         @Test
         void shouldIssueLabelForRequestedRma() {
-            RmaRequested rmaRequested = validRmaRequested();
-            Rma rma = Rma.fromHistory(List.of(rmaRequested));
+            Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
 
-            LabelIssued labelIssued = rma.issueLabel(
+            LabelIssued event = rma.issueLabel(
                 LABEL_ID,
                 TRACKING_NUMBER,
                 LABEL_FILE_KEY,
                 ISSUED_AT
             );
             assertAll(
-                () -> assertThat(labelIssued.labelId()).isEqualTo(LABEL_ID),
-                () -> assertThat(labelIssued.trackingNumber()).isEqualTo(TRACKING_NUMBER),
-                () -> assertThat(labelIssued.labelFileKey()).isEqualTo(LABEL_FILE_KEY),
-                () -> assertThat(labelIssued.issuedAt()).isEqualTo(ISSUED_AT)
+                () -> assertThat(event.labelId()).isEqualTo(LABEL_ID),
+                () -> assertThat(event.trackingNumber()).isEqualTo(TRACKING_NUMBER),
+                () -> assertThat(event.labelFileKey()).isEqualTo(LABEL_FILE_KEY),
+                () -> assertThat(event.issuedAt()).isEqualTo(ISSUED_AT)
             );
         }
 
         @Test
         void shouldRebuildLabelIssuedStateFromHistory() {
+            LabelIssued event = validLabelIssued();
             Rma rma = Rma.fromHistory( List.of(
                 validRmaRequested(),
-                validLabelIssued()
+                event
             ));
 
             assertAll(
                 () -> assertThat(rma.status()).isEqualTo(RmaStatus.LABEL_ISSUED),
                 () -> assertThat(rma.version()).isEqualTo(2),
-                () -> assertThat(rma.labelId()).isEqualTo(LABEL_ID),
-                () -> assertThat(rma.trackingNumber()).isEqualTo(TRACKING_NUMBER)
+                () -> assertThat(rma.labelId()).isEqualTo(event.labelId()),
+                () -> assertThat(rma.trackingNumber()).isEqualTo(event.trackingNumber())
             );
         }
 
@@ -308,7 +308,7 @@ public class RmaTest {
     }
 
     @Nested
-    class PickupTest {
+    class PickupTests {
         @Test
         void shouldSchedulePickupForRmaWithIssuedLabel() {
             Rma rma = Rma.fromHistory( List.of(
@@ -316,30 +316,31 @@ public class RmaTest {
                 validLabelIssued()
             ));
 
-            PickupScheduled pickupScheduled = rma.schedulePickup(
+            PickupScheduled event = rma.schedulePickup(
                 PICKUP_ID,
                 SCHEDULED_FOR
             );
 
             assertAll(
-                () -> assertThat(pickupScheduled.pickupId()).isEqualTo(PICKUP_ID),
-                () -> assertThat(pickupScheduled.scheduledFor()).isEqualTo(SCHEDULED_FOR)
+                () -> assertThat(event.pickupId()).isEqualTo(PICKUP_ID),
+                () -> assertThat(event.scheduledFor()).isEqualTo(SCHEDULED_FOR)
             );
 
         }
 
         @Test
         void shouldRebuildPickupScheduledStateFromHistory() {
+            PickupScheduled event = validPickupScheduled();
             Rma rma = Rma.fromHistory(List.of(
                 validRmaRequested(),
                 validLabelIssued(),
-                validPickupScheduled()
+                event
             ));
 
             assertAll(
                 () -> assertThat(rma.version()).isEqualTo(3),
                 () -> assertThat(rma.status()).isEqualTo(RmaStatus.PICKUP_SCHEDULED),
-                () -> assertThat(rma.pickupScheduledFor()).isEqualTo(SCHEDULED_FOR)
+                () -> assertThat(rma.pickupScheduledFor()).isEqualTo(event.scheduledFor())
             );
         }
 
@@ -368,9 +369,9 @@ public class RmaTest {
                 validLabelIssued()
             ));
 
-            ParcelInTransit parcelInTransit = rma.markParcelInTransit(COLLECTED_AT);
+            ParcelInTransit event = rma.markParcelInTransit(COLLECTED_AT);
 
-            assertThat(parcelInTransit.collectedAt()).isEqualTo(COLLECTED_AT);
+            assertThat(event.collectedAt()).isEqualTo(COLLECTED_AT);
         }
 
         @Test
@@ -381,9 +382,9 @@ public class RmaTest {
                 validPickupScheduled()
             ));
 
-            ParcelInTransit parcelInTransit = rma.markParcelInTransit(COLLECTED_AT);
+            ParcelInTransit event = rma.markParcelInTransit(COLLECTED_AT);
 
-            assertThat(parcelInTransit.collectedAt()).isEqualTo(COLLECTED_AT);
+            assertThat(event.collectedAt()).isEqualTo(COLLECTED_AT);
         }
 
         @Test
@@ -399,11 +400,12 @@ public class RmaTest {
 
         @Test
         void shouldRebuildInTransitStateFromHistory() {
+            ParcelInTransit event = validParcelInTransit();
             Rma rma = Rma.fromHistory(List.of(
                 validRmaRequested(),
                 validLabelIssued(),
                 validPickupScheduled(),
-                validParcelInTransit()
+                event
             ));
 
             assertAll(
@@ -424,11 +426,11 @@ public class RmaTest {
                 validParcelInTransit()
             ));
 
-            ParcelReceived parcelReceived = rma.receive(RECEIVED_AT, WAREHOUSE_ID);
+            ParcelReceived event = rma.receive(RECEIVED_AT, WAREHOUSE_ID);
 
             assertAll(
-                () -> assertThat(parcelReceived.receivedAt()).isEqualTo(RECEIVED_AT),
-                () -> assertThat(parcelReceived.warehouseId()).isEqualTo(WAREHOUSE_ID)
+                () -> assertThat(event.receivedAt()).isEqualTo(RECEIVED_AT),
+                () -> assertThat(event.warehouseId()).isEqualTo(WAREHOUSE_ID)
             );
         }
 
@@ -443,24 +445,25 @@ public class RmaTest {
 
         @Test
         void shouldRebuildReceivedStateFromHistory() {
+            ParcelReceived event = validParcelReceived();
             Rma rma = Rma.fromHistory(List.of(
                 validRmaRequested(),
                 validLabelIssued(),
                 validPickupScheduled(),
                 validParcelInTransit(),
-                validParcelReceived()
+                event
             ));
 
             assertAll(
                 () -> assertThat(rma.status()).isEqualTo(RmaStatus.RECEIVED),
                 () -> assertThat(rma.version()).isEqualTo(5),
-                () -> assertThat(rma.parcelReceivedAt()).isEqualTo(RECEIVED_AT)
+                () -> assertThat(rma.parcelReceivedAt()).isEqualTo(event.receivedAt())
             );
         }
     }
 
     @Nested
-    class InspectionTests {
+    class InspectionStartTests {
         @Test
         void shouldStartInspectionFromReceived() {
             Rma rma = Rma.fromHistory(List.of(
@@ -471,10 +474,12 @@ public class RmaTest {
                 validParcelReceived()
             ));
 
-            InspectionStarted inspectionStarted = rma.startInspection(INSPECTOR_ID, STARTED_AT);
+            InspectionStarted event = rma.startInspection(INSPECTOR_ID, STARTED_AT);
 
-            assertThat(inspectionStarted.inspectorId()).isEqualTo(INSPECTOR_ID);
-            assertThat(inspectionStarted.startedAt()).isEqualTo(STARTED_AT);
+            assertAll(
+                () -> assertThat(event.inspectorId()).isEqualTo(INSPECTOR_ID),
+                () -> assertThat(event.startedAt()).isEqualTo(STARTED_AT)
+            );
         }
 
         @Test
@@ -510,18 +515,11 @@ public class RmaTest {
     class CompleteInspectionTests {
         @Test
         void shouldCompleteInspectionFromUnderInspection() {
-            Rma rma = Rma.fromHistory(List.of(
-                validRmaRequested(),
-                validLabelIssued(),
-                validPickupScheduled(),
-                validParcelInTransit(),
-                validParcelReceived(),
-                validInspectionStarted()
-            ));
+            Rma rma = rmaUnderInspection();
 
             List<InspectionResult> results = List.of(validInspectionResult());
 
-            InspectionCompleted inspectionCompleted = rma.completeInspection(
+            InspectionCompleted event = rma.completeInspection(
                 INSPECTOR_ID,
                 COMPLETED_AT,
                 results,
@@ -530,10 +528,10 @@ public class RmaTest {
             );
 
             assertAll(
-                () -> assertThat(inspectionCompleted.inspectorId()).isEqualTo(INSPECTOR_ID),
-                () -> assertThat(inspectionCompleted.completedAt()).isEqualTo(COMPLETED_AT),
-                () -> assertThat(inspectionCompleted.approvedBy()).isNull(),
-                () -> assertThat(inspectionCompleted.results()).isEqualTo(results)
+                () -> assertThat(event.inspectorId()).isEqualTo(INSPECTOR_ID),
+                () -> assertThat(event.completedAt()).isEqualTo(COMPLETED_AT),
+                () -> assertThat(event.approvedBy()).isNull(),
+                () -> assertThat(event.results()).isEqualTo(results)
             );
         }
 
@@ -575,6 +573,7 @@ public class RmaTest {
 
         @Test
         void shouldApplyInspectionResultsToRmaItems() {
+            InspectionCompleted event = validInspectionCompleted();
             Rma rma = Rma.fromHistory(List.of(
                 validRmaRequested(),
                 validLabelIssued(),
@@ -582,11 +581,11 @@ public class RmaTest {
                 validParcelInTransit(),
                 validParcelReceived(),
                 validInspectionStarted(),
-                validInspectionCompleted()
+                event
             ));
 
             RmaItem item = rma.items().getFirst();
-            InspectionResult inspectionResult = validInspectionResult();
+            InspectionResult inspectionResult = event.results().getFirst();
 
             assertAll(
                 () -> assertThat(item.grade()).isEqualTo(inspectionResult.grade()),
@@ -598,14 +597,7 @@ public class RmaTest {
 
         @Test
         void shouldRejectIncompleteInspection() {
-            Rma rma = Rma.fromHistory(List.of(
-                validRmaRequested(),
-                validLabelIssued(),
-                validPickupScheduled(),
-                validParcelInTransit(),
-                validParcelReceived(),
-                validInspectionStarted()
-            ));
+            Rma rma = rmaUnderInspection();
 
             assertThatThrownBy(() -> rma.completeInspection(
                 INSPECTOR_ID,
@@ -614,36 +606,19 @@ public class RmaTest {
                 null,
                 INSPECTION_POLICY
             ))
-                .isInstanceOf(RmaDomainException.class)
-                .satisfies(exception ->
-                    assertThat(((RmaDomainException) exception).code())
+                .isInstanceOfSatisfying(
+                    RmaDomainException.class,
+                    exception -> assertThat(exception.code())
                         .isEqualTo(RmaErrorCode.INCOMPLETE_INSPECTION)
                 );
         }
 
         @Test
         void shouldRequireSupervisorApprovalForExpensiveRejectedItem() {
-            Money money = new Money(new BigDecimal("550.00"), PLN);
-            List<RequestedItem> items = List.of(new RequestedItem(
-                "item-1",
-                "sku-1",
-                "book",
-                1,
-                money
-            )) ;
+            List<RequestedItem> items = List.of(validRequestedItem("item-1", PLN, "550.00")) ;
+
             Rma rma = Rma.fromHistory(List.of(
-                new RmaRequested(
-                    RMA_ID,
-                    BUSINESS_NUMBER,
-                    ORDER_ID,
-                    CUSTOMER_ID,
-                    DELIVERED_AT,
-                    REQUESTED_AT,
-                    RmaReason.CHANGED_MIND,
-                    "Nie pasuje",
-                    PLN,
-                    items
-                ),
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
                 validLabelIssued(),
                 validPickupScheduled(),
                 validParcelInTransit(),
@@ -654,40 +629,22 @@ public class RmaTest {
             assertThatThrownBy(() -> rma.completeInspection(
                 INSPECTOR_ID,
                 COMPLETED_AT,
-                List.of(new InspectionResult("item-1", ItemGrade.D, "note", List.of())),
+                List.of(validInspectionResult(ItemGrade.D)),
                 null,
                 INSPECTION_POLICY
             ))
-                .isInstanceOf(RmaDomainException.class)
-                .satisfies(exception ->
-                    assertThat(((RmaDomainException) exception).code())
+                .isInstanceOfSatisfying(
+                    RmaDomainException.class,
+                    exception -> assertThat(exception.code())
                         .isEqualTo(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED)
                 );
         }
 
         @Test
         void shouldAllowExpensiveRejectedItemWithSupervisorApproval() {
-            Money money = new Money(new BigDecimal("550.00"), PLN);
-            List<RequestedItem> items = List.of(new RequestedItem(
-                "item-1",
-                "sku-1",
-                "book",
-                1,
-                money
-            )) ;
+            List<RequestedItem> items = List.of(validRequestedItem("item-1", PLN, "550.00"));
             Rma rma = Rma.fromHistory(List.of(
-                new RmaRequested(
-                    RMA_ID,
-                    BUSINESS_NUMBER,
-                    ORDER_ID,
-                    CUSTOMER_ID,
-                    DELIVERED_AT,
-                    REQUESTED_AT,
-                    RmaReason.CHANGED_MIND,
-                    "Nie pasuje",
-                    PLN,
-                    items
-                ),
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
                 validLabelIssued(),
                 validPickupScheduled(),
                 validParcelInTransit(),
@@ -698,7 +655,7 @@ public class RmaTest {
             InspectionCompleted event = rma.completeInspection(
                 INSPECTOR_ID,
                 COMPLETED_AT,
-                List.of(new InspectionResult("item-1", ItemGrade.D, "note", List.of())),
+                List.of(validInspectionResult(ItemGrade.D)),
                 SUPERVISOR_ID,
                 INSPECTION_POLICY
             );
@@ -712,14 +669,7 @@ public class RmaTest {
 
         @Test
         void shouldAllowInspectionWithoutPhotos() {
-            Rma rma = Rma.fromHistory(List.of(
-                validRmaRequested(),
-                validLabelIssued(),
-                validPickupScheduled(),
-                validParcelInTransit(),
-                validParcelReceived(),
-                validInspectionStarted()
-            ));
+            Rma rma = rmaUnderInspection();
 
             InspectionCompleted event = rma.completeInspection(
                 INSPECTOR_ID,
@@ -745,15 +695,7 @@ public class RmaTest {
     class RefundDecisionTests {
         @Test
         void shouldDecideFullRefundWhenNoItemHasGradeD() {
-            Rma rma = Rma.fromHistory(List.of(
-                validRmaRequested(),
-                validLabelIssued(),
-                validPickupScheduled(),
-                validParcelInTransit(),
-                validParcelReceived(),
-                validInspectionStarted(),
-                validInspectionCompleted()
-            ));
+            Rma rma = rmaAfterInspection();
 
             RefundDecided refundDecided =  rma.decideRefund(DECIDED_AT, REFUND_POLICY);
 
@@ -772,12 +714,34 @@ public class RmaTest {
 
         @Test
         void shouldRequireRmaRequestedAsFirstEvent() {
-            DomainEvent wrongFirstEvent = new LabelIssued(
-                "label-1", "tracking-1", "fileKey", REQUESTED_AT);
+            DomainEvent wrongFirstEvent = validLabelIssued();
             assertThatThrownBy(() -> Rma.fromHistory(List.of(wrongFirstEvent)))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("RmaRequested must be the first event");;
+                .hasMessage("RmaRequested must be the first event");
         }
+    }
+
+    private Rma rmaUnderInspection() {
+        return Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted()
+        ));
+    }
+
+    private Rma rmaAfterInspection() {
+        return Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted(),
+            validInspectionCompleted()
+        ));
     }
 
     private RmaRequested validRmaRequested(
@@ -845,29 +809,39 @@ public class RmaTest {
 
     private RequestedItem validRequestedItem(
         String itemId,
-        Currency currency
+        Currency currency,
+        String amount
     ) {
         return new RequestedItem(
             itemId,
             "sku-" + itemId,
             "book",
             1,
-            new Money(new BigDecimal("30.00"), currency)
+            new Money(new BigDecimal(amount), currency)
         );
     }
 
     private RequestedItem validRequestedItem() {
-        return validRequestedItem("1", PLN);
+        return validRequestedItem("item-1", PLN, "30.00");
     }
 
-    private InspectionResult validInspectionResult() {
+    private InspectionResult validInspectionResult(
+        String itemId,
+        ItemGrade grade
+    ) {
         return new InspectionResult(
-            "item-1",
-            ItemGrade.A,
+            itemId,
+            grade,
             "Item looks good",
             List.of()
         );
     }
 
+    private InspectionResult validInspectionResult(ItemGrade grade) {
+        return validInspectionResult("item-1", grade);
+    }
 
+    private InspectionResult validInspectionResult() {
+        return validInspectionResult("item-1", ItemGrade.A);
+    }
 }
