@@ -792,6 +792,454 @@ public class RmaTest {
                 () -> assertThat(rma.version()).isEqualTo(8)
             );
         }
+
+        @Test
+        void shouldRejectRefundWhenAllItemsHaveGradeD() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "30.00"),
+                validRequestedItem("item-2", PLN, "45.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.D),
+                validInspectionResult("item-2", ItemGrade.D));
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                REFUND_POLICY
+            );
+
+            assertThat(event.decision())
+                .isEqualTo(RefundDecision.REJECTED);
+        }
+
+        @Test
+        void shouldMoveToRejectedAfterRejectedRefundDecision() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "30.00"),
+                validRequestedItem("item-2", PLN, "45.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.D),
+                validInspectionResult("item-2", ItemGrade.D));
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.REJECTED),
+                () -> assertThat(rma.version()).isEqualTo(8)
+            );
+        }
+
+        @Test
+        void shouldRebuildRejectedStateFromHistory() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "30.00"),
+                validRequestedItem("item-2", PLN, "45.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.D),
+                validInspectionResult("item-2", ItemGrade.D)
+            );
+            RefundDecided event = validRejectedRefundDecided();
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results),
+                event
+            ));
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.REJECTED),
+                () -> assertThat(rma.version()).isEqualTo(8),
+                () -> assertThat(rma.refundAmount()).isEqualTo(event.refundAmount()),
+                () -> assertThat(rma.deductionTotal()).isEqualTo(event.deductionTotal())
+            );
+        }
+
+        @Test
+        void shouldRejectRefundDecisionWhenRmaIsNotUnderInspection() {
+            Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
+
+            assertThatThrownBy(() -> rma.decideRefund(DECIDED_AT, REFUND_POLICY))
+                .isInstanceOf(InvalidRmaStateTransitionException.class)
+                .hasMessage(
+                    "Invalid RMA state transition from REQUESTED to REFUND_PENDING"
+                );
+        }
+
+        @Test
+        void shouldApplyGradeDeductionForChangedMind() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "30.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.B)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                REFUND_POLICY
+            );
+
+            ItemRefundDecision itemDecision = event.itemDecisions().getFirst();
+
+            assertAll(
+                () -> assertThat(itemDecision.deductionPercent()).isEqualTo(15),
+                () -> assertThat(itemDecision.refundableAmount())
+                    .isEqualTo(new Money(new BigDecimal("25.50"), PLN))
+            );
+        }
+
+        @Test
+        void shouldNotApplyGradeDeductionForReasonOtherThanChangedMind() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "30.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.C)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.DAMAGED_IN_TRANSIT, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                REFUND_POLICY
+            );
+
+            ItemRefundDecision itemDecision = event.itemDecisions().getFirst();
+
+            assertAll(
+                () -> assertThat(itemDecision.deductionPercent()).isZero(),
+                () -> assertThat(itemDecision.refundableAmount())
+                    .isEqualTo(new Money(new BigDecimal("30.00"), PLN))
+            );
+        }
+
+        @Test
+        void shouldApplyReturnShippingFeeForChangedMind() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "30.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.A)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+            assertAll(
+                () -> assertThat(event.refundAmount().amount())
+                    .isEqualByComparingTo("15.00"),
+                () -> assertThat(event.deductionTotal().amount())
+                    .isEqualByComparingTo("15.00")
+            );
+        }
+
+        @Test
+        void shouldNotApplyReturnShippingFeeForReasonOtherThanChangedMind() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "30.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.A)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.DAMAGED_IN_TRANSIT, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+            assertAll(
+                () -> assertThat(event.refundAmount().amount())
+                    .isEqualByComparingTo("30.00"),
+                () -> assertThat(event.deductionTotal().amount())
+                    .isEqualByComparingTo("0.00")
+            );
+        }
+
+        @Test
+        void shouldCalculateRefundForMultipleItems() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "100.00"),
+                validRequestedItem("item-2", PLN, "50.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.B),
+                validInspectionResult("item-2", ItemGrade.C)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+            assertAll(
+                () -> assertThat(event.refundAmount().amount())
+                    .isEqualByComparingTo("100.00"),
+                () -> assertThat(event.deductionTotal().amount())
+                    .isEqualByComparingTo("50.00")
+            );
+        }
+
+        @Test
+        void shouldRoundEachItemBeforeSumming() {
+            RefundPolicy policyWithoutShipping = new RefundPolicy(
+                0,
+                15,
+                40,
+                new BigDecimal("0.00")
+            );
+
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "0.03"),
+                validRequestedItem("item-2", PLN, "0.03")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.B),
+                validInspectionResult("item-2", ItemGrade.B)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                policyWithoutShipping
+            );
+
+            assertAll(
+                () -> assertThat(event.refundAmount().amount())
+                    .isEqualByComparingTo("0.06"),
+                () -> assertThat(event.deductionTotal().amount())
+                    .isEqualByComparingTo("0.00")
+            );
+        }
+
+        @Test
+        void shouldStoreRefundAmountAndDeductionTotalAfterRefundDecision() {
+            Rma rma = rmaAfterInspection();
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                REFUND_POLICY
+            );
+
+            assertAll(
+                () -> assertThat(rma.refundAmount())
+                    .isEqualTo(event.refundAmount()),
+                () -> assertThat(rma.deductionTotal())
+                    .isEqualTo(event.deductionTotal())
+            );
+        }
+
+        @Test
+        void shouldApplyRefundDecisionToRmaItems() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "100.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.B)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+            RmaItem item = rma.items().getFirst();
+
+            assertAll(
+                () -> assertThat(item.deductionPercent()).isEqualTo(15),
+                () -> assertThat(item.refundableAmount())
+                    .isEqualTo(new Money(new BigDecimal("85.00"), PLN))
+            );
+        }
+
+        @Test
+        void shouldRejectRefundWhenCalculatedRefundAmountIsZero() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "15.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.A)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                REFUND_POLICY
+            );
+
+            assertAll(
+                () -> assertThat(event.refundAmount().amount())
+                    .isEqualByComparingTo("0.00"),
+                () -> assertThat(event.decision())
+                    .isEqualTo(RefundDecision.REJECTED)
+            );
+        }
+
+        @Test
+        void shouldNeverCalculateNegativeRefundAmount() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "10.00"),
+                validRequestedItem("item-2", PLN, "100.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.A),
+                validInspectionResult("item-2", ItemGrade.D)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                REFUND_POLICY
+            );
+
+            assertThat(event.refundAmount().amount())
+                .isEqualByComparingTo("0.00");
+        }
+
+        @Test
+        void shouldNeverCalculateRefundAmountGreaterThanTotalItemValue() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "100.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.B)
+            );
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                REFUND_POLICY
+            );
+
+            BigDecimal totalItemValue = items.stream()
+                .map(item -> item.unitPrice().amount()
+                    .multiply(BigDecimal.valueOf(item.quantity())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            assertThat(event.refundAmount().amount())
+                .isLessThanOrEqualTo(totalItemValue);
+        }
     }
 
     @Nested
@@ -912,6 +1360,30 @@ public class RmaTest {
                 )
             ),
             null,
+            DECIDED_AT
+        );
+    }
+
+    private RefundDecided validRejectedRefundDecided() {
+        return new RefundDecided(
+            RefundDecision.REJECTED,
+            new Money(new BigDecimal("0.00"), PLN),
+            new Money(new BigDecimal("0.00"), PLN),
+            List.of(
+                new ItemRefundDecision(
+                    "item-1",
+                    ItemGrade.D,
+                    0,
+                    new Money(new BigDecimal("0.00"), PLN)
+                ),
+                new ItemRefundDecision(
+                    "item-2",
+                    ItemGrade.D,
+                    0,
+                    new Money(new BigDecimal("0.00"), PLN)
+                )
+            ),
+            "All items rejected after inspection",
             DECIDED_AT
         );
     }
