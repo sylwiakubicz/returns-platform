@@ -165,6 +165,9 @@ public final class Rma {
         Instant decidedAt,
         RefundPolicy policy
     ) {
+        if (status != RmaStatus.UNDER_INSPECTION) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.REFUND_PENDING);
+        }
 
         List<ItemRefundDecision> itemDecisions = this.items.stream()
             .map(item -> calculateItemRefundDecision(
