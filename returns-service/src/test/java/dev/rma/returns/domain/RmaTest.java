@@ -696,10 +696,101 @@ public class RmaTest {
         @Test
         void shouldDecideFullRefundWhenNoItemHasGradeD() {
             Rma rma = rmaAfterInspection();
-
             RefundDecided refundDecided =  rma.decideRefund(DECIDED_AT, REFUND_POLICY);
-
             assertThat(refundDecided.decision()).isEqualTo(RefundDecision.FULL);
+        }
+
+        @Test
+        void shouldMoveToRefundPendingAfterFullRefundDecision() {
+            Rma rma = rmaAfterInspection();
+            rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.REFUND_PENDING),
+                () -> assertThat(rma.version()).isEqualTo(8),
+                () -> assertThat(rma.inspectorId()).isEqualTo(INSPECTOR_ID),
+                () -> assertThat(rma.inspectedAt()).isEqualTo(COMPLETED_AT)
+            );
+        }
+
+        @Test
+        void shouldRebuildRefundPendingStateFromHistory() {
+            RefundDecided event = validFullRefundDecided();
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(),
+                event
+            ));
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.REFUND_PENDING),
+                () -> assertThat(rma.version()).isEqualTo(8),
+                () -> assertThat(rma.refundAmount()).isEqualTo(event.refundAmount()),
+                () -> assertThat(rma.deductionTotal()).isEqualTo(event.deductionTotal())
+            );
+        }
+
+        @Test
+        void shouldDecidePartialRefundWhenSomeItemsHaveGradeD() {
+            List<RequestedItem> items = List.of(
+              validRequestedItem("item-1", PLN, "30.00"),
+              validRequestedItem("item-2", PLN, "45.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.D),
+                validInspectionResult("item-2", ItemGrade.A));
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            RefundDecided event = rma.decideRefund(
+                DECIDED_AT,
+                REFUND_POLICY
+            );
+
+            assertThat(event.decision()).isEqualTo(RefundDecision.PARTIAL);
+        }
+
+        @Test
+        void shouldMoveToRefundPendingAfterPartialRefundDecision() {
+            List<RequestedItem> items = List.of(
+                validRequestedItem("item-1", PLN, "30.00"),
+                validRequestedItem("item-2", PLN, "45.00")
+            );
+
+            List<InspectionResult> results = List.of(
+                validInspectionResult("item-1", ItemGrade.D),
+                validInspectionResult("item-2", ItemGrade.A));
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, items),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(results)
+            ));
+
+            rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.REFUND_PENDING),
+                () -> assertThat(rma.version()).isEqualTo(8)
+            );
         }
     }
 
@@ -805,6 +896,24 @@ public class RmaTest {
 
     private InspectionCompleted validInspectionCompleted() {
         return validInspectionCompleted(List.of(validInspectionResult()));
+    }
+
+    private RefundDecided validFullRefundDecided() {
+        return new RefundDecided(
+            RefundDecision.FULL,
+            new Money(new BigDecimal("15.00"), PLN),
+            new Money(new BigDecimal("15.00"), PLN),
+            List.of(
+                new ItemRefundDecision(
+                    "item-1",
+                    ItemGrade.A,
+                    0,
+                    new Money(new BigDecimal("30.00"), PLN)
+                )
+            ),
+            null,
+            DECIDED_AT
+        );
     }
 
     private RequestedItem validRequestedItem(
