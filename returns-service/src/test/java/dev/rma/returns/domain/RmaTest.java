@@ -71,6 +71,9 @@ public class RmaTest {
     private static final Instant FAILED_AT =
         Instant.parse("2026-09-20T15:00:00Z");
 
+    private static final Instant RETRY_DECIDED_AT =
+        Instant.parse("2026-09-21T15:00:00Z");
+
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
     private static final String CUSTOMER_ID = "customer-1";
@@ -1498,6 +1501,108 @@ public class RmaTest {
     }
 
     @Nested
+    class RefundRetryTests {
+        @Test
+        void shouldRetryRefundFromRefundFailed() {
+            Rma rma = rmaRefundFailed();
+
+            RefundDecided event = rma.retryRefund(RETRY_DECIDED_AT);
+
+            assertAll(
+                () -> assertThat(event.decision())
+                    .isEqualTo(RefundDecision.FULL),
+                () -> assertThat(event.refundAmount())
+                    .isEqualTo(rma.refundAmount()),
+                () -> assertThat(event.deductionTotal())
+                    .isEqualTo(rma.deductionTotal()),
+                () -> assertThat(event.decidedAt())
+                    .isEqualTo(RETRY_DECIDED_AT)
+            );
+        }
+
+        @Test
+        void shouldMoveToRefundPendingAfterManualRefundRetry() {
+            Rma rma = rmaRefundFailed();
+
+            rma.retryRefund(RETRY_DECIDED_AT);
+
+            assertAll(
+                () -> assertThat(rma.status())
+                    .isEqualTo(RmaStatus.REFUND_PENDING),
+                () -> assertThat(rma.version()).isEqualTo(10)
+            );
+        }
+
+        @Test
+        void shouldIncreasePayoutAttemptAfterManualRefundRetry() {
+            Rma rma = rmaRefundFailed();
+
+            assertThat(rma.payoutAttempt()).isEqualTo(1);
+
+            rma.retryRefund(RETRY_DECIDED_AT);
+
+            assertThat(rma.payoutAttempt()).isEqualTo(2);
+        }
+
+        @Test
+        void shouldPreserveRefundAmountsAfterManualRefundRetry() {
+            Rma rma = rmaRefundFailed();
+
+            Money refundAmount = rma.refundAmount();
+            Money deductionTotal = rma.deductionTotal();
+
+            rma.retryRefund(RETRY_DECIDED_AT);
+
+            assertAll(
+                () -> assertThat(rma.refundAmount())
+                    .isEqualTo(refundAmount),
+                () -> assertThat(rma.deductionTotal())
+                    .isEqualTo(deductionTotal)
+            );
+        }
+
+        @Test
+        void shouldRebuildRefundPendingStateAfterManualRefundRetry() {
+            RefundDecided retryEvent = validRetryRefundDecided();
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(),
+                validFullRefundDecided(),
+                validRefundFailed(),
+                retryEvent
+            ));
+
+            assertAll(
+                () -> assertThat(rma.status())
+                    .isEqualTo(RmaStatus.REFUND_PENDING),
+                () -> assertThat(rma.version()).isEqualTo(10),
+                () -> assertThat(rma.payoutAttempt()).isEqualTo(2),
+                () -> assertThat(rma.refundAmount())
+                    .isEqualTo(retryEvent.refundAmount())
+            );
+        }
+
+        @Test
+        void shouldRejectManualRefundRetryWhenRmaIsNotRefundFailed() {
+            Rma rma = rmaRefundPending();
+
+            assertThatThrownBy(() ->
+                rma.retryRefund(RETRY_DECIDED_AT)
+            )
+                .isInstanceOf(InvalidRmaStateTransitionException.class)
+                .hasMessage(
+                    "Invalid RMA state transition from REFUND_PENDING to REFUND_PENDING"
+                );
+        }
+    }
+
+    @Nested
     class HistoryTests {
         @Test
         void shouldRejectEmptyHistory() {
@@ -1548,6 +1653,20 @@ public class RmaTest {
             validInspectionStarted(),
             validInspectionCompleted(),
             validFullRefundDecided()
+        ));
+    }
+
+    private Rma rmaRefundFailed() {
+        return Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted(),
+            validInspectionCompleted(),
+            validFullRefundDecided(),
+            validRefundFailed()
         ));
     }
 
@@ -1672,6 +1791,19 @@ public class RmaTest {
             1,
             false,
             FAILED_AT
+        );
+    }
+
+    private RefundDecided validRetryRefundDecided() {
+        RefundDecided original = validFullRefundDecided();
+
+        return new RefundDecided(
+            original.decision(),
+            original.refundAmount(),
+            original.deductionTotal(),
+            original.itemDecisions(),
+            null,
+            RETRY_DECIDED_AT
         );
     }
 

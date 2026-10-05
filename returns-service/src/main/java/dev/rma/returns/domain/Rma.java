@@ -270,6 +270,36 @@ public final class Rma {
 
         return event;
     }
+    public RefundDecided retryRefund(Instant decidedAt) {
+        if (status != RmaStatus.REFUND_FAILED) {
+            throw new InvalidRmaStateTransitionException(
+                status,
+                RmaStatus.REFUND_PENDING
+            );
+        }
+
+        List<ItemRefundDecision> itemDecisions = items.stream()
+            .map(item -> new ItemRefundDecision(
+                item.itemId(),
+                item.grade(),
+                item.deductionPercent(),
+                item.refundableAmount()
+            ))
+            .toList();
+
+        RefundDecided event = new RefundDecided(
+            currentRefundDecision(),
+            refundAmount,
+            deductionTotal,
+            itemDecisions,
+            null,
+            decidedAt
+        );
+
+        apply(event);
+
+        return event;
+    }
 
 
     public static Rma fromHistory(List<DomainEvent> events) {
@@ -372,13 +402,17 @@ public final class Rma {
     }
 
     private void apply(RefundDecided refundDecided) {
+        boolean retryAfterFailure = this.status == RmaStatus.REFUND_FAILED;
+
         this.version += 1;
+
         this.status = refundDecided.decision() == RefundDecision.REJECTED
             ? RmaStatus.REJECTED
             : RmaStatus.REFUND_PENDING;
 
         this.refundAmount = refundDecided.refundAmount();
         this.deductionTotal = refundDecided.deductionTotal();
+
         this.items = this.items.stream()
             .map(item -> {
                 ItemRefundDecision itemRefundDecision = refundDecided.itemDecisions().stream()
@@ -389,6 +423,10 @@ public final class Rma {
                 return item.withRefundDecision(itemRefundDecision);
             })
             .toList();
+
+        if (retryAfterFailure) {
+            this.payoutAttempt += 1;
+        }
     }
 
     private void apply(RefundExecuted event) {
@@ -657,6 +695,15 @@ public final class Rma {
                 "Executed refund amount must match decided refund amount"
             );
         }
+    }
+
+    private RefundDecision currentRefundDecision() {
+        boolean hasRejectedItem = items.stream()
+            .anyMatch(item -> item.grade() == ItemGrade.D);
+
+        return hasRejectedItem
+            ? RefundDecision.PARTIAL
+            : RefundDecision.FULL;
     }
 
     public UUID rmaId() {
