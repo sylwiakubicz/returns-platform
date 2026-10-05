@@ -68,6 +68,9 @@ public class RmaTest {
     private static final Instant EXECUTED_AT =
         Instant.parse("2026-09-20T15:00:00Z");
 
+    private static final Instant FAILED_AT =
+        Instant.parse("2026-09-20T15:00:00Z");
+
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
     private static final String CUSTOMER_ID = "customer-1";
@@ -1372,6 +1375,129 @@ public class RmaTest {
     }
 
     @Nested
+    class RefundFailedTests {
+        @Test
+        void shouldFailRefundFromRefundPending() {
+            Rma rma = rmaRefundPending();
+
+            RefundFailed event = rma.failRefund(
+                FailureCode.INSUFFICIENT_FUNDS,
+                "Insufficient funds",
+                1,
+                false,
+                FAILED_AT
+            );
+
+            assertAll(
+                () -> assertThat(event.failureCode())
+                    .isEqualTo(FailureCode.INSUFFICIENT_FUNDS),
+                () -> assertThat(event.failureMessage())
+                    .isEqualTo("Insufficient funds"),
+                () -> assertThat(event.attempt()).isEqualTo(1),
+                () -> assertThat(event.retryable()).isFalse(),
+                () -> assertThat(event.failedAt()).isEqualTo(FAILED_AT)
+            );
+        }
+
+        @Test
+        void shouldMoveToRefundFailedAfterRefundFailure() {
+            Rma rma = rmaRefundPending();
+
+            rma.failRefund(
+                FailureCode.INSUFFICIENT_FUNDS,
+                "Insufficient funds",
+                1,
+                false,
+                FAILED_AT
+            );
+
+            assertAll(
+                () -> assertThat(rma.status())
+                    .isEqualTo(RmaStatus.REFUND_FAILED),
+                () -> assertThat(rma.version()).isEqualTo(9)
+            );
+        }
+
+        @Test
+        void shouldRebuildRefundFailedStateFromHistory() {
+            RefundFailed event = validRefundFailed();
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(),
+                validFullRefundDecided(),
+                event
+            ));
+
+            assertAll(
+                () -> assertThat(rma.status())
+                    .isEqualTo(RmaStatus.REFUND_FAILED),
+                () -> assertThat(rma.version()).isEqualTo(9),
+                () -> assertThat(rma.failureCode())
+                    .isEqualTo(event.failureCode()),
+                () -> assertThat(rma.payoutAttempt())
+                    .isEqualTo(event.attempt())
+            );
+        }
+
+        @Test
+        void shouldRejectRefundFailureWhenRmaIsNotRefundPending() {
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested()
+            ));
+
+            assertThatThrownBy(() -> rma.failRefund(
+                FailureCode.INSUFFICIENT_FUNDS,
+                "Insufficient funds",
+                1,
+                false,
+                FAILED_AT
+            ))
+                .isInstanceOf(InvalidRmaStateTransitionException.class)
+                .hasMessage(
+                    "Invalid RMA state transition from REQUESTED to REFUND_FAILED"
+                );
+        }
+
+        @Test
+        void shouldStoreFailureCodeAfterRefundFailure() {
+            Rma rma = rmaRefundPending();
+
+            rma.failRefund(
+                FailureCode.INVALID_ACCOUNT,
+                "Invalid account",
+                1,
+                false,
+                FAILED_AT
+            );
+
+            assertThat(rma.failureCode())
+                .isEqualTo(FailureCode.INVALID_ACCOUNT);
+        }
+
+        @Test
+        void shouldStorePayoutAttemptAfterRefundFailure() {
+            Rma rma = rmaRefundPending();
+
+            rma.failRefund(
+                FailureCode.TIMEOUT,
+                "Provider timeout",
+                3,
+                true,
+                FAILED_AT
+            );
+
+            assertThat(rma.payoutAttempt()).isEqualTo(3);
+        }
+
+    }
+
+    @Nested
     class HistoryTests {
         @Test
         void shouldRejectEmptyHistory() {
@@ -1536,6 +1662,16 @@ public class RmaTest {
             new Money(new BigDecimal("15.00"), PLN),
             PAYOUT_ATTEMPT,
             EXECUTED_AT
+        );
+    }
+
+    private RefundFailed validRefundFailed() {
+        return new RefundFailed(
+            FailureCode.INSUFFICIENT_FUNDS,
+            "Insufficient funds",
+            1,
+            false,
+            FAILED_AT
         );
     }
 

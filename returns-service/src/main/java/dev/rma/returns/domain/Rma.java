@@ -244,6 +244,33 @@ public final class Rma {
         return event;
     }
 
+    public RefundFailed failRefund(
+        FailureCode failureCode,
+        String failureMessage,
+        int attempt,
+        boolean retryable,
+        Instant failedAt
+    ) {
+        if (status != RmaStatus.REFUND_PENDING) {
+            throw new InvalidRmaStateTransitionException(
+                status,
+                RmaStatus.REFUND_FAILED
+            );
+        }
+
+        RefundFailed event = new RefundFailed(
+            failureCode,
+            failureMessage,
+            attempt,
+            retryable,
+            failedAt
+        );
+
+        apply(event);
+
+        return event;
+    }
+
 
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
@@ -276,6 +303,7 @@ public final class Rma {
             case InspectionCompleted e -> apply(e);
             case RefundDecided e -> apply(e);
             case RefundExecuted e -> apply(e);
+            case RefundFailed e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -367,6 +395,13 @@ public final class Rma {
         this.version += 1;
         this.status = RmaStatus.REFUNDED;
         this.payoutId = event.payoutId();
+        this.payoutAttempt = event.attempt();
+    }
+
+    private void apply(RefundFailed event) {
+        this.version += 1;
+        this.status = RmaStatus.REFUND_FAILED;
+        this.failureCode = event.failureCode();
         this.payoutAttempt = event.attempt();
     }
 
