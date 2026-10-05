@@ -65,6 +65,9 @@ public class RmaTest {
     private static final Instant DECIDED_AT =
         Instant.parse("2026-09-19T15:00:00Z");
 
+    private static final Instant EXECUTED_AT =
+        Instant.parse("2026-09-20T15:00:00Z");
+
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
     private static final String ORDER_ID = "order-1";
     private static final String CUSTOMER_ID = "customer-1";
@@ -77,6 +80,8 @@ public class RmaTest {
     private static final String WAREHOUSE_ID = "warehouse-1";
     private static final String INSPECTOR_ID = "inspector-1";
     private static final String SUPERVISOR_ID = "supervisor-1";
+    private static final String PAYOUT_ID = "payout-1";
+    private static final int PAYOUT_ATTEMPT = 1;
 
     private static final Currency PLN = Currency.getInstance("PLN");
     private static final Currency EUR = Currency.getInstance("EUR");
@@ -1243,6 +1248,130 @@ public class RmaTest {
     }
 
     @Nested
+    class RefundExecutedTests {
+        @Test
+        void shouldExecuteRefundFromRefundPending() {
+            Rma rma = rmaRefundPending();
+
+            RefundExecuted event = rma.executeRefund(
+                PAYOUT_ID,
+                rma.refundAmount(),
+                PAYOUT_ATTEMPT,
+                EXECUTED_AT
+            );
+
+            assertAll(
+                () -> assertThat(event.payoutId()).isEqualTo(PAYOUT_ID),
+                () -> assertThat(event.amount()).isEqualTo(rma.refundAmount()),
+                () -> assertThat(event.attempt()).isEqualTo(PAYOUT_ATTEMPT),
+                () -> assertThat(event.executedAt()).isEqualTo(EXECUTED_AT)
+            );
+        }
+
+        @Test
+        void shouldMoveToRefundedAfterRefundExecution() {
+            Rma rma = rmaRefundPending();
+
+            rma.executeRefund(
+                PAYOUT_ID,
+                rma.refundAmount(),
+                PAYOUT_ATTEMPT,
+                EXECUTED_AT
+            );
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.REFUNDED),
+                () -> assertThat(rma.version()).isEqualTo(9)
+            );
+        }
+
+        @Test
+        void shouldRebuildRefundedStateFromHistory() {
+            RefundExecuted event = validRefundExecuted();
+
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(),
+                validLabelIssued(),
+                validPickupScheduled(),
+                validParcelInTransit(),
+                validParcelReceived(),
+                validInspectionStarted(),
+                validInspectionCompleted(),
+                validFullRefundDecided(),
+                event
+            ));
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.REFUNDED),
+                () -> assertThat(rma.version()).isEqualTo(9),
+                () -> assertThat(rma.payoutId()).isEqualTo(event.payoutId()),
+                () -> assertThat(rma.payoutAttempt()).isEqualTo(event.attempt())
+            );
+        }
+
+        @Test
+        void shouldRejectRefundExecutionWhenRmaIsNotRefundPending() {
+            Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
+
+            assertThatThrownBy(() -> rma.executeRefund(
+                PAYOUT_ID,
+                new Money(new BigDecimal("15.00"), PLN),
+                PAYOUT_ATTEMPT,
+                EXECUTED_AT
+            ))
+                .isInstanceOf(InvalidRmaStateTransitionException.class)
+                .hasMessage(
+                    "Invalid RMA state transition from REQUESTED to REFUNDED"
+                );
+        }
+
+        @Test
+        void shouldRejectRefundExecutionWhenAmountDiffersFromDecision() {
+            Rma rma = rmaRefundPending();
+
+            Money differentAmount =
+                new Money(new BigDecimal("10.00"), PLN);
+
+            assertThatThrownBy(() -> rma.executeRefund(
+                PAYOUT_ID,
+                differentAmount,
+                PAYOUT_ATTEMPT,
+                EXECUTED_AT
+            ))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Executed refund amount must match decided refund amount");
+        }
+
+        @Test
+        void shouldStorePayoutIdAfterRefundExecution() {
+            Rma rma = rmaRefundPending();
+
+            rma.executeRefund(
+                PAYOUT_ID,
+                rma.refundAmount(),
+                PAYOUT_ATTEMPT,
+                EXECUTED_AT
+            );
+
+            assertThat(rma.payoutId()).isEqualTo(PAYOUT_ID);
+        }
+
+        @Test
+        void shouldStorePayoutAttemptAfterRefundExecution() {
+            Rma rma = rmaRefundPending();
+
+            rma.executeRefund(
+                PAYOUT_ID,
+                rma.refundAmount(),
+                PAYOUT_ATTEMPT,
+                EXECUTED_AT
+            );
+
+            assertThat(rma.payoutAttempt()).isEqualTo(PAYOUT_ATTEMPT);
+        }
+    }
+
+    @Nested
     class HistoryTests {
         @Test
         void shouldRejectEmptyHistory() {
@@ -1280,6 +1409,19 @@ public class RmaTest {
             validParcelReceived(),
             validInspectionStarted(),
             validInspectionCompleted()
+        ));
+    }
+
+    private Rma rmaRefundPending() {
+        return Rma.fromHistory(List.of(
+            validRmaRequested(),
+            validLabelIssued(),
+            validPickupScheduled(),
+            validParcelInTransit(),
+            validParcelReceived(),
+            validInspectionStarted(),
+            validInspectionCompleted(),
+            validFullRefundDecided()
         ));
     }
 
@@ -1385,6 +1527,15 @@ public class RmaTest {
             ),
             "All items rejected after inspection",
             DECIDED_AT
+        );
+    }
+
+    private RefundExecuted validRefundExecuted() {
+        return new RefundExecuted(
+            PAYOUT_ID,
+            new Money(new BigDecimal("15.00"), PLN),
+            PAYOUT_ATTEMPT,
+            EXECUTED_AT
         );
     }
 

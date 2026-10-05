@@ -217,6 +217,33 @@ public final class Rma {
         return event;
     }
 
+    public RefundExecuted executeRefund(
+        String payoutId,
+        Money amount,
+        int attempt,
+        Instant executedAt
+    ) {
+        if (status != RmaStatus.REFUND_PENDING) {
+            throw new InvalidRmaStateTransitionException(
+                status,
+                RmaStatus.REFUNDED
+            );
+        }
+
+        validateExecutedRefundAmount(amount);
+
+        RefundExecuted event = new RefundExecuted(
+            payoutId,
+            amount,
+            attempt,
+            executedAt
+        );
+
+        apply(event);
+
+        return event;
+    }
+
 
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
@@ -248,6 +275,7 @@ public final class Rma {
             case InspectionStarted e -> apply(e);
             case InspectionCompleted e -> apply(e);
             case RefundDecided e -> apply(e);
+            case RefundExecuted e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -333,6 +361,13 @@ public final class Rma {
                 return item.withRefundDecision(itemRefundDecision);
             })
             .toList();
+    }
+
+    private void apply(RefundExecuted event) {
+        this.version += 1;
+        this.status = RmaStatus.REFUNDED;
+        this.payoutId = event.payoutId();
+        this.payoutAttempt = event.attempt();
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
@@ -571,6 +606,22 @@ public final class Rma {
         }
 
         return "Refund rejected";
+    }
+
+    private void validateExecutedRefundAmount(Money amount) {
+        Objects.requireNonNull(amount, "amount must not be null");
+
+        boolean sameCurrency =
+            amount.currency().equals(refundAmount.currency());
+
+        boolean sameAmount =
+            amount.amount().compareTo(refundAmount.amount()) == 0;
+
+        if (!sameCurrency || !sameAmount) {
+            throw new IllegalArgumentException(
+                "Executed refund amount must match decided refund amount"
+            );
+        }
     }
 
     public UUID rmaId() {
