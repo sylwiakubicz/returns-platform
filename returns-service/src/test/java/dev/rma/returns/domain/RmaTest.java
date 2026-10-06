@@ -1603,6 +1603,100 @@ public class RmaTest {
     }
 
     @Nested
+    class ExpirationTests {
+        private final Instant expiredAt = REQUESTED_AT.plus(14, ChronoUnit.DAYS);
+
+        @Test
+        void shouldExpireFromEachStateBeforeShipment() {
+            List<DomainEvent> history = List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled()
+            );
+
+            for (int length = 1; length <= history.size(); length++) {
+                Rma rma = Rma.fromHistory(history.subList(0, length));
+                List<RmaItem> items = rma.items();
+
+                RmaExpired event = rma.expire(expiredAt, 14);
+
+                assertAll(
+                    () -> assertThat(event).isEqualTo(new RmaExpired(expiredAt, 14)),
+                    () -> assertThat(rma.status()).isEqualTo(RmaStatus.EXPIRED),
+                    () -> assertThat(rma.items()).isEqualTo(items),
+                    () -> assertThat(rma.businessNumber()).isEqualTo(BUSINESS_NUMBER),
+                    () -> assertThat(rma.closedAt()).isNull(),
+                    () -> assertThat(rma.closureReason()).isNull()
+                );
+                assertThat(rma.version()).isEqualTo(length + 1);
+            }
+        }
+
+        @Test
+        void shouldRebuildExpiredStateFromHistory() {
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                new RmaExpired(expiredAt, 14)
+            ));
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.EXPIRED),
+                () -> assertThat(rma.version()).isEqualTo(4),
+                () -> assertThat(rma.closedAt()).isNull(),
+                () -> assertThat(rma.closureReason()).isNull()
+            );
+        }
+
+        @Test
+        void shouldRejectExpirationAfterShipmentWithoutChangingState() {
+            List<DomainEvent> history = List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit(), validParcelReceived(), validInspectionStarted(),
+                validInspectionCompleted(), validFullRefundDecided()
+            );
+
+            for (int length = 4; length <= history.size(); length++) {
+                assertExpirationRejected(Rma.fromHistory(history.subList(0, length)));
+            }
+
+            assertExpirationRejected(rmaRefundFailed());
+            Rma refunded = rmaRefundPending();
+            refunded.executeRefund(PAYOUT_ID, refunded.refundAmount(), 1, EXECUTED_AT);
+            assertExpirationRejected(refunded);
+
+            Rma rejected = Rma.fromHistory(List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit(), validParcelReceived(), validInspectionStarted(),
+                validInspectionCompleted(List.of(validInspectionResult("item-1", ItemGrade.D)))
+            ));
+            rejected.decideRefund(DECIDED_AT, REFUND_POLICY);
+            assertExpirationRejected(rejected);
+        }
+
+        @Test
+        void shouldRejectRepeatedExpiration() {
+            Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
+            rma.expire(expiredAt, 14);
+
+            assertExpirationRejected(rma);
+        }
+
+        private void assertExpirationRejected(Rma rma) {
+            RmaStatus status = rma.status();
+            int version = rma.version();
+            List<RmaItem> items = rma.items();
+
+            assertThatThrownBy(() -> rma.expire(expiredAt, 14))
+                .isInstanceOf(InvalidRmaStateTransitionException.class)
+                .hasMessage("Invalid RMA state transition from " + status + " to EXPIRED");
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(status),
+                () -> assertThat(rma.version()).isEqualTo(version),
+                () -> assertThat(rma.items()).isEqualTo(items)
+            );
+        }
+    }
+
+    @Nested
     class HistoryTests {
         @Test
         void shouldRejectEmptyHistory() {

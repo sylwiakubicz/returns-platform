@@ -302,6 +302,18 @@ public final class Rma {
     }
 
 
+    public RmaExpired expire(Instant expiredAt, int daysSinceRequest) {
+        if (status != RmaStatus.REQUESTED
+            && status != RmaStatus.LABEL_ISSUED
+            && status != RmaStatus.PICKUP_SCHEDULED) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.EXPIRED);
+        }
+
+        RmaExpired event = new RmaExpired(expiredAt, daysSinceRequest);
+        apply(event);
+        return event;
+    }
+
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
 
@@ -334,6 +346,7 @@ public final class Rma {
             case RefundDecided e -> apply(e);
             case RefundExecuted e -> apply(e);
             case RefundFailed e -> apply(e);
+            case RmaExpired e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -441,6 +454,11 @@ public final class Rma {
         this.status = RmaStatus.REFUND_FAILED;
         this.failureCode = event.failureCode();
         this.payoutAttempt = event.attempt();
+    }
+
+    private void apply(RmaExpired event) {
+        this.status = RmaStatus.EXPIRED;
+        this.version += 1;
     }
 
     private List<RmaItem> mapItems(List<RequestedItem> requestedItems) {
