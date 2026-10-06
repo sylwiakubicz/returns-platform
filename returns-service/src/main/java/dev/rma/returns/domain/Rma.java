@@ -314,6 +314,16 @@ public final class Rma {
         return event;
     }
 
+    public RmaLost declareLost(String lastKnownStatus, Instant declaredLostAt) {
+        if (status != RmaStatus.IN_TRANSIT) {
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.LOST);
+        }
+
+        RmaLost event = new RmaLost(lastKnownStatus, declaredLostAt);
+        apply(event);
+        return event;
+    }
+
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
 
@@ -347,6 +357,7 @@ public final class Rma {
             case RefundExecuted e -> apply(e);
             case RefundFailed e -> apply(e);
             case RmaExpired e -> apply(e);
+            case RmaLost e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -458,6 +469,11 @@ public final class Rma {
 
     private void apply(RmaExpired event) {
         this.status = RmaStatus.EXPIRED;
+        this.version += 1;
+    }
+
+    private void apply(RmaLost event) {
+        this.status = RmaStatus.LOST;
         this.version += 1;
     }
 

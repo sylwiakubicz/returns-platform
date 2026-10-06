@@ -1697,6 +1697,114 @@ public class RmaTest {
     }
 
     @Nested
+    class LostTests {
+        private final Instant declaredLostAt = COLLECTED_AT.plus(10, ChronoUnit.DAYS);
+        private final String lastKnownStatus = "IN_TRANSIT";
+
+        @Test
+        void shouldDeclareParcelLostFromInTransit() {
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit()
+            ));
+            List<RmaItem> items = rma.items();
+
+            RmaLost event = rma.declareLost(lastKnownStatus, declaredLostAt);
+
+            assertAll(
+                () -> assertThat(event).isEqualTo(new RmaLost(lastKnownStatus, declaredLostAt)),
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.LOST),
+                () -> assertThat(rma.version()).isEqualTo(5),
+                () -> assertThat(rma.items()).isEqualTo(items),
+                () -> assertThat(rma.businessNumber()).isEqualTo(BUSINESS_NUMBER),
+                () -> assertThat(rma.closedAt()).isNull(),
+                () -> assertThat(rma.closureReason()).isNull()
+            );
+        }
+
+        @Test
+        void shouldRebuildLostStateFromHistory() {
+            Rma rma = lostRma();
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.LOST),
+                () -> assertThat(rma.version()).isEqualTo(5),
+                () -> assertThat(rma.closedAt()).isNull(),
+                () -> assertThat(rma.closureReason()).isNull()
+            );
+        }
+
+        @Test
+        void shouldRejectDeclarationOutsideInTransitWithoutChangingState() {
+            List<DomainEvent> history = List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit(), validParcelReceived(), validInspectionStarted(),
+                validInspectionCompleted(), validFullRefundDecided()
+            );
+
+            for (int length = 1; length <= history.size(); length++) {
+                if (length != 4) {
+                    assertDeclarationRejected(Rma.fromHistory(history.subList(0, length)));
+                }
+            }
+
+            assertDeclarationRejected(rmaRefundFailed());
+            Rma refunded = rmaRefundPending();
+            refunded.executeRefund(PAYOUT_ID, refunded.refundAmount(), 1, EXECUTED_AT);
+            assertDeclarationRejected(refunded);
+
+            Rma rejected = Rma.fromHistory(List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit(), validParcelReceived(), validInspectionStarted(),
+                validInspectionCompleted(List.of(validInspectionResult("item-1", ItemGrade.D)))
+            ));
+            rejected.decideRefund(DECIDED_AT, REFUND_POLICY);
+            assertDeclarationRejected(rejected);
+
+            Rma expired = Rma.fromHistory(List.of(validRmaRequested()));
+            expired.expire(declaredLostAt, 14);
+            assertDeclarationRejected(expired);
+            assertDeclarationRejected(lostRma());
+        }
+
+        @Test
+        void shouldRejectLateParcelReceiptAfterDeclaration() {
+            Rma rma = lostRma();
+
+            assertThatThrownBy(() -> rma.receive(declaredLostAt, WAREHOUSE_ID))
+                .isInstanceOf(InvalidRmaStateTransitionException.class)
+                .hasMessage("Invalid RMA state transition from LOST to RECEIVED");
+
+            assertThat(rma.status()).isEqualTo(RmaStatus.LOST);
+            assertThat(rma.version()).isEqualTo(5);
+            assertThat(rma.parcelReceivedAt()).isNull();
+        }
+
+        private Rma lostRma() {
+            return Rma.fromHistory(List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit(), new RmaLost(lastKnownStatus, declaredLostAt)
+            ));
+        }
+
+        private void assertDeclarationRejected(Rma rma) {
+            RmaStatus status = rma.status();
+            int version = rma.version();
+            List<RmaItem> items = rma.items();
+
+            assertThatThrownBy(() -> rma.declareLost(lastKnownStatus, declaredLostAt))
+                .isInstanceOf(InvalidRmaStateTransitionException.class)
+                .hasMessage("Invalid RMA state transition from " + status + " to LOST");
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(status),
+                () -> assertThat(rma.version()).isEqualTo(version),
+                () -> assertThat(rma.items()).isEqualTo(items)
+            );
+        }
+    }
+
+    @Nested
     class HistoryTests {
         @Test
         void shouldRejectEmptyHistory() {
