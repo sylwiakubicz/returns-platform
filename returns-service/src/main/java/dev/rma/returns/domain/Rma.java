@@ -339,6 +339,26 @@ public final class Rma {
         return event;
     }
 
+    public RmaClosed close(ClosureReason closureReason, Instant closedAt) {
+        ClosureReason expectedReason = switch (status) {
+            case REFUNDED -> ClosureReason.REFUND_COMPLETED;
+            case REJECTED -> ClosureReason.REJECTED_AFTER_INSPECTION;
+            case EXPIRED -> ClosureReason.EXPIRED_NO_SHIPMENT;
+            case LOST -> ClosureReason.PARCEL_LOST;
+            case CANCELLED -> ClosureReason.CANCELLED_BY_CUSTOMER;
+            case REFUND_FAILED -> ClosureReason.CLOSED_BY_OPERATOR;
+            default -> throw new InvalidRmaStateTransitionException(status, RmaStatus.CLOSED);
+        };
+
+        RmaClosed event = new RmaClosed(closureReason, closedAt);
+        if (closureReason != expectedReason) {
+            throw new IllegalArgumentException("Closure reason must match current RMA state");
+        }
+
+        apply(event);
+        return event;
+    }
+
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
 
@@ -374,9 +394,7 @@ public final class Rma {
             case RmaExpired e -> apply(e);
             case RmaLost e -> apply(e);
             case RmaCancelled e -> apply(e);
-
-            // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
-            default -> throw new IllegalStateException("Unexpected value: " + event);
+            case RmaClosed e -> apply(e);
         }
     }
 
@@ -495,6 +513,13 @@ public final class Rma {
 
     private void apply(RmaCancelled event) {
         this.status = RmaStatus.CANCELLED;
+        this.version += 1;
+    }
+
+    private void apply(RmaClosed event) {
+        this.status = RmaStatus.CLOSED;
+        this.closedAt = event.closedAt();
+        this.closureReason = event.closureReason();
         this.version += 1;
     }
 

@@ -1917,6 +1917,169 @@ public class RmaTest {
     }
 
     @Nested
+    class ClosureTests {
+        private final Instant closedAt = EXECUTED_AT.plus(1, ChronoUnit.DAYS);
+
+        @Test
+        void shouldCloseEachEligibleStateWithMatchingReason() {
+            for (ClosureReason reason : ClosureReason.values()) {
+                Rma rma = rmaReadyForClosure(reason);
+                int version = rma.version();
+                List<RmaItem> items = rma.items();
+                Money refundAmount = rma.refundAmount();
+                String payoutId = rma.payoutId();
+
+                RmaClosed event = rma.close(reason, closedAt);
+
+                assertAll(
+                    () -> assertThat(event).isEqualTo(new RmaClosed(reason, closedAt)),
+                    () -> assertThat(rma.status()).isEqualTo(RmaStatus.CLOSED),
+                    () -> assertThat(rma.version()).isEqualTo(version + 1),
+                    () -> assertThat(rma.closedAt()).isEqualTo(closedAt),
+                    () -> assertThat(rma.closureReason()).isEqualTo(reason),
+                    () -> assertThat(rma.items()).isEqualTo(items),
+                    () -> assertThat(rma.refundAmount()).isEqualTo(refundAmount),
+                    () -> assertThat(rma.payoutId()).isEqualTo(payoutId),
+                    () -> assertThat(rma.businessNumber()).isEqualTo(BUSINESS_NUMBER)
+                );
+            }
+        }
+
+        @Test
+        void shouldRejectMismatchedClosureReasonWithoutChangingState() {
+            for (ClosureReason expected : ClosureReason.values()) {
+                for (ClosureReason wrong : ClosureReason.values()) {
+                    if (expected == wrong) {
+                        continue;
+                    }
+                    Rma rma = rmaReadyForClosure(expected);
+                    RmaStatus status = rma.status();
+                    int version = rma.version();
+
+                    assertThatThrownBy(() -> rma.close(wrong, closedAt))
+                        .isInstanceOf(IllegalArgumentException.class)
+                        .hasMessage("Closure reason must match current RMA state");
+
+                    assertThat(rma.status()).isEqualTo(status);
+                    assertThat(rma.version()).isEqualTo(version);
+                    assertThat(rma.closedAt()).isNull();
+                    assertThat(rma.closureReason()).isNull();
+                }
+            }
+        }
+
+        @Test
+        void shouldRejectClosureFromActiveStates() {
+            List<DomainEvent> history = List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit(), validParcelReceived(), validInspectionStarted(),
+                validInspectionCompleted(), validFullRefundDecided()
+            );
+
+            for (int length = 1; length <= history.size(); length++) {
+                Rma rma = Rma.fromHistory(history.subList(0, length));
+                RmaStatus status = rma.status();
+                int version = rma.version();
+
+                assertThatThrownBy(() -> rma.close(ClosureReason.CLOSED_BY_OPERATOR, closedAt))
+                    .isInstanceOf(InvalidRmaStateTransitionException.class);
+
+                assertThat(rma.status()).isEqualTo(status);
+                assertThat(rma.version()).isEqualTo(version);
+                assertThat(rma.closedAt()).isNull();
+                assertThat(rma.closureReason()).isNull();
+            }
+        }
+
+        @Test
+        void shouldRebuildClosedStateFromHistory() {
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(), new RmaCancelled(CUSTOMER_ID, REQUESTED_AT, null),
+                new RmaClosed(ClosureReason.CANCELLED_BY_CUSTOMER, closedAt)
+            ));
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.CLOSED),
+                () -> assertThat(rma.version()).isEqualTo(3),
+                () -> assertThat(rma.closedAt()).isEqualTo(closedAt),
+                () -> assertThat(rma.closureReason()).isEqualTo(ClosureReason.CANCELLED_BY_CUSTOMER)
+            );
+        }
+
+        @Test
+        void shouldRejectEveryCommandAfterClosureWithoutChangingState() {
+            Rma rma = rmaReadyForClosure(ClosureReason.REFUND_COMPLETED);
+            rma.close(ClosureReason.REFUND_COMPLETED, closedAt);
+            int version = rma.version();
+
+            List<Runnable> commands = List.of(
+                () -> rma.issueLabel(LABEL_ID, TRACKING_NUMBER, LABEL_FILE_KEY, ISSUED_AT),
+                () -> rma.schedulePickup(PICKUP_ID, SCHEDULED_FOR),
+                () -> rma.markParcelInTransit(COLLECTED_AT),
+                () -> rma.receive(RECEIVED_AT, WAREHOUSE_ID),
+                () -> rma.startInspection(INSPECTOR_ID, STARTED_AT),
+                () -> rma.completeInspection(INSPECTOR_ID, COMPLETED_AT,
+                    List.of(validInspectionResult()), null, INSPECTION_POLICY),
+                () -> rma.decideRefund(DECIDED_AT, REFUND_POLICY),
+                () -> rma.executeRefund(PAYOUT_ID, rma.refundAmount(), 1, EXECUTED_AT),
+                () -> rma.failRefund(FailureCode.TIMEOUT, "Timeout", 1, true, FAILED_AT),
+                () -> rma.retryRefund(RETRY_DECIDED_AT),
+                () -> rma.expire(closedAt, 14),
+                () -> rma.declareLost("IN_TRANSIT", closedAt),
+                () -> rma.cancel(CUSTOMER_ID, closedAt, null),
+                () -> rma.close(ClosureReason.REFUND_COMPLETED, closedAt)
+            );
+
+            for (Runnable command : commands) {
+                assertThatThrownBy(command::run).isInstanceOfAny(
+                    InvalidRmaStateTransitionException.class, RmaDomainException.class
+                );
+                assertThat(rma.status()).isEqualTo(RmaStatus.CLOSED);
+                assertThat(rma.version()).isEqualTo(version);
+                assertThat(rma.closedAt()).isEqualTo(closedAt);
+                assertThat(rma.closureReason()).isEqualTo(ClosureReason.REFUND_COMPLETED);
+            }
+        }
+
+        private Rma rmaReadyForClosure(ClosureReason reason) {
+            return switch (reason) {
+                case REFUND_COMPLETED -> {
+                    Rma rma = rmaRefundPending();
+                    rma.executeRefund(PAYOUT_ID, rma.refundAmount(), 1, EXECUTED_AT);
+                    yield rma;
+                }
+                case REJECTED_AFTER_INSPECTION -> {
+                    Rma rma = Rma.fromHistory(List.of(
+                        validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                        validParcelInTransit(), validParcelReceived(), validInspectionStarted(),
+                        validInspectionCompleted(List.of(validInspectionResult("item-1", ItemGrade.D)))
+                    ));
+                    rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+                    yield rma;
+                }
+                case EXPIRED_NO_SHIPMENT -> {
+                    Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
+                    rma.expire(closedAt, 14);
+                    yield rma;
+                }
+                case PARCEL_LOST -> {
+                    Rma rma = Rma.fromHistory(List.of(
+                        validRmaRequested(), validLabelIssued(), validParcelInTransit()
+                    ));
+                    rma.declareLost("IN_TRANSIT", closedAt);
+                    yield rma;
+                }
+                case CANCELLED_BY_CUSTOMER -> {
+                    Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
+                    rma.cancel(CUSTOMER_ID, REQUESTED_AT, null);
+                    yield rma;
+                }
+                case CLOSED_BY_OPERATOR -> rmaRefundFailed();
+            };
+        }
+    }
+
+    @Nested
     class HistoryTests {
         @Test
         void shouldRejectEmptyHistory() {
