@@ -1805,6 +1805,118 @@ public class RmaTest {
     }
 
     @Nested
+    class CancellationTests {
+        private final Instant cancelledAt = REQUESTED_AT.plus(1, ChronoUnit.DAYS);
+
+        @Test
+        void shouldCancelFromEachStateBeforeShipment() {
+            List<DomainEvent> history = List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled()
+            );
+
+            for (int length = 1; length <= history.size(); length++) {
+                Rma rma = Rma.fromHistory(history.subList(0, length));
+                List<RmaItem> items = rma.items();
+                RmaReason originalReason = rma.reason();
+
+                RmaCancelled event = rma.cancel(CUSTOMER_ID, cancelledAt, "Wycofuję zgłoszenie");
+
+                assertAll(
+                    () -> assertThat(event).isEqualTo(
+                        new RmaCancelled(CUSTOMER_ID, cancelledAt, "Wycofuję zgłoszenie")),
+                    () -> assertThat(rma.status()).isEqualTo(RmaStatus.CANCELLED),
+                    () -> assertThat(rma.items()).isEqualTo(items),
+                    () -> assertThat(rma.reason()).isEqualTo(originalReason),
+                    () -> assertThat(rma.businessNumber()).isEqualTo(BUSINESS_NUMBER),
+                    () -> assertThat(rma.closedAt()).isNull(),
+                    () -> assertThat(rma.closureReason()).isNull()
+                );
+                assertThat(rma.version()).isEqualTo(length + 1);
+            }
+        }
+
+        @Test
+        void shouldAllowCancellationWithoutNote() {
+            Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
+
+            RmaCancelled event = rma.cancel(CUSTOMER_ID, cancelledAt, null);
+
+            assertThat(event.reason()).isNull();
+            assertThat(rma.status()).isEqualTo(RmaStatus.CANCELLED);
+        }
+
+        @Test
+        void shouldRebuildCancelledStateFromHistory() {
+            Rma rma = Rma.fromHistory(List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                new RmaCancelled(CUSTOMER_ID, cancelledAt, null)
+            ));
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.CANCELLED),
+                () -> assertThat(rma.version()).isEqualTo(4),
+                () -> assertThat(rma.closedAt()).isNull(),
+                () -> assertThat(rma.closureReason()).isNull()
+            );
+        }
+
+        @Test
+        void shouldRejectCancellationAfterShipmentOrTerminationWithoutChangingState() {
+            List<DomainEvent> history = List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit(), validParcelReceived(), validInspectionStarted(),
+                validInspectionCompleted(), validFullRefundDecided()
+            );
+
+            for (int length = 4; length <= history.size(); length++) {
+                assertCancellationRejected(Rma.fromHistory(history.subList(0, length)));
+            }
+
+            assertCancellationRejected(rmaRefundFailed());
+            Rma refunded = rmaRefundPending();
+            refunded.executeRefund(PAYOUT_ID, refunded.refundAmount(), 1, EXECUTED_AT);
+            assertCancellationRejected(refunded);
+
+            Rma rejected = Rma.fromHistory(List.of(
+                validRmaRequested(), validLabelIssued(), validPickupScheduled(),
+                validParcelInTransit(), validParcelReceived(), validInspectionStarted(),
+                validInspectionCompleted(List.of(validInspectionResult("item-1", ItemGrade.D)))
+            ));
+            rejected.decideRefund(DECIDED_AT, REFUND_POLICY);
+            assertCancellationRejected(rejected);
+
+            Rma expired = Rma.fromHistory(List.of(validRmaRequested()));
+            expired.expire(cancelledAt, 14);
+            assertCancellationRejected(expired);
+
+            Rma lost = Rma.fromHistory(history.subList(0, 4));
+            lost.declareLost("IN_TRANSIT", cancelledAt);
+            assertCancellationRejected(lost);
+
+            Rma cancelled = Rma.fromHistory(List.of(validRmaRequested()));
+            cancelled.cancel(CUSTOMER_ID, cancelledAt, null);
+            assertCancellationRejected(cancelled);
+        }
+
+        private void assertCancellationRejected(Rma rma) {
+            RmaStatus status = rma.status();
+            int version = rma.version();
+            List<RmaItem> items = rma.items();
+
+            assertThatThrownBy(() -> rma.cancel(CUSTOMER_ID, cancelledAt, null))
+                .isInstanceOfSatisfying(RmaDomainException.class,
+                    exception -> assertThat(exception.code())
+                        .isEqualTo(RmaErrorCode.CANCELLATION_NOT_ALLOWED));
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(status),
+                () -> assertThat(rma.version()).isEqualTo(version),
+                () -> assertThat(rma.items()).isEqualTo(items)
+            );
+        }
+    }
+
+    @Nested
     class HistoryTests {
         @Test
         void shouldRejectEmptyHistory() {

@@ -324,6 +324,21 @@ public final class Rma {
         return event;
     }
 
+    public RmaCancelled cancel(String cancelledBy, Instant cancelledAt, String reason) {
+        if (status != RmaStatus.REQUESTED
+            && status != RmaStatus.LABEL_ISSUED
+            && status != RmaStatus.PICKUP_SCHEDULED) {
+            throw new RmaDomainException(
+                RmaErrorCode.CANCELLATION_NOT_ALLOWED,
+                "Cancellation is not allowed in state " + status
+            );
+        }
+
+        RmaCancelled event = new RmaCancelled(cancelledBy, cancelledAt, reason);
+        apply(event);
+        return event;
+    }
+
     public static Rma fromHistory(List<DomainEvent> events) {
         Objects.requireNonNull(events, "events must not be null");
 
@@ -358,6 +373,7 @@ public final class Rma {
             case RefundFailed e -> apply(e);
             case RmaExpired e -> apply(e);
             case RmaLost e -> apply(e);
+            case RmaCancelled e -> apply(e);
 
             // temporary solution -> pozostale eventy nie sa obslugiwane jeszcze
             default -> throw new IllegalStateException("Unexpected value: " + event);
@@ -474,6 +490,11 @@ public final class Rma {
 
     private void apply(RmaLost event) {
         this.status = RmaStatus.LOST;
+        this.version += 1;
+    }
+
+    private void apply(RmaCancelled event) {
+        this.status = RmaStatus.CANCELLED;
         this.version += 1;
     }
 
