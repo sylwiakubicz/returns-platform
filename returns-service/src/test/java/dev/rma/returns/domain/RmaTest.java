@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -527,12 +528,86 @@ public class RmaTest {
 
     @Nested
     class CompleteInspectionTests {
+        @ParameterizedTest
+        @CsvSource({
+            "A,A,100.00,FULL,REFUND_PENDING,185.00",
+            "A,D,100.00,PARTIAL,REFUND_PENDING,85.00",
+            "D,D,100.00,REJECTED,REJECTED,0.00",
+            "A,D,10.00,REJECTED,REJECTED,0.00"
+        })
+        void shouldCompleteInspectionAndDecideRefundTogether(
+            ItemGrade firstGrade, ItemGrade secondGrade, String price,
+            RefundDecision decision, RmaStatus status, String amount
+        ) {
+            List<DomainEvent> history = List.of(
+                validRmaRequested(RmaReason.CHANGED_MIND, List.of(
+                    validRequestedItem("item-1", PLN, price),
+                    validRequestedItem("item-2", PLN, price)
+                )),
+                validLabelIssued(), validPickupScheduled(), validParcelInTransit(),
+                validParcelReceived(), validInspectionStarted()
+            );
+            Rma rma = Rma.fromHistory(history);
+
+            List<DomainEvent> events = rma.completeInspection(
+                INSPECTOR_ID, COMPLETED_AT, List.of(
+                    validInspectionResult("item-1", firstGrade),
+                    validInspectionResult("item-2", secondGrade)
+                ), null, INSPECTION_POLICY, REFUND_POLICY
+            );
+
+            assertThat(events).hasSize(2);
+            assertThat(events.getFirst()).isInstanceOf(InspectionCompleted.class);
+            assertThat(events.getLast()).isInstanceOf(RefundDecided.class);
+            RefundDecided refundDecided = (RefundDecided) events.getLast();
+            assertThat(refundDecided.decision()).isEqualTo(decision);
+            assertThat(refundDecided.decidedAt()).isEqualTo(COMPLETED_AT);
+            assertThat(rma.status()).isEqualTo(status);
+            assertThat(rma.version()).isEqualTo(8);
+            assertThat(rma.refundAmount().amount()).isEqualByComparingTo(amount);
+            assertThat(rma.payoutAttempt()).isEqualTo(status == RmaStatus.REFUND_PENDING ? 1 : null);
+
+            List<DomainEvent> fullHistory = new java.util.ArrayList<>(history);
+            fullHistory.addAll(events);
+            Rma restored = Rma.fromHistory(fullHistory);
+            assertAll(
+                () -> assertThat(restored.status()).isEqualTo(rma.status()),
+                () -> assertThat(restored.version()).isEqualTo(rma.version()),
+                () -> assertThat(restored.items()).isEqualTo(rma.items()),
+                () -> assertThat(restored.refundAmount()).isEqualTo(rma.refundAmount()),
+                () -> assertThat(restored.deductionTotal()).isEqualTo(rma.deductionTotal()),
+                () -> assertThat(restored.payoutAttempt()).isEqualTo(rma.payoutAttempt())
+            );
+        }
+
+        @Test
+        void shouldNotApplyInspectionWhenRefundCalculationFails() {
+            Rma rma = rmaUnderInspection();
+            int version = rma.version();
+            List<RmaItem> items = rma.items();
+
+            assertThatThrownBy(() -> rma.completeInspection(
+                INSPECTOR_ID, COMPLETED_AT, List.of(validInspectionResult()),
+                null, INSPECTION_POLICY, null
+            )).isInstanceOf(NullPointerException.class);
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.UNDER_INSPECTION),
+                () -> assertThat(rma.version()).isEqualTo(version),
+                () -> assertThat(rma.items()).isEqualTo(items),
+                () -> assertThat(rma.inspectedAt()).isNull(),
+                () -> assertThat(rma.inspectorId()).isNull(),
+                () -> assertThat(rma.refundAmount()).isNull(),
+                () -> assertThat(rma.deductionTotal()).isNull()
+            );
+        }
+
         @Test
         void shouldRejectRepeatedInspectionCompletionWithoutChangingState() {
             Rma rma = rmaUnderInspection();
             rma.completeInspection(
                 INSPECTOR_ID, COMPLETED_AT, List.of(validInspectionResult()),
-                null, INSPECTION_POLICY
+                null, INSPECTION_POLICY, REFUND_POLICY
             );
 
             assertRepeatedInspectionRejected(rma);
@@ -544,6 +619,9 @@ public class RmaTest {
         }
 
         private void assertRepeatedInspectionRejected(Rma rma) {
+            RmaStatus status = rma.status();
+            Money refundAmount = rma.refundAmount();
+            Money deductionTotal = rma.deductionTotal();
             int version = rma.version();
             List<RmaItem> items = rma.items();
             String inspectorId = rma.inspectorId();
@@ -552,19 +630,18 @@ public class RmaTest {
             assertThatThrownBy(() -> rma.completeInspection(
                 "other-inspector", COMPLETED_AT.plus(1, ChronoUnit.HOURS),
                 List.of(validInspectionResult(ItemGrade.D)), SUPERVISOR_ID,
-                INSPECTION_POLICY
+                INSPECTION_POLICY, REFUND_POLICY
             ))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("Inspection has already been completed");
+                .isInstanceOfAny(IllegalStateException.class, InvalidRmaStateTransitionException.class);
 
             assertAll(
-                () -> assertThat(rma.status()).isEqualTo(RmaStatus.UNDER_INSPECTION),
+                () -> assertThat(rma.status()).isEqualTo(status),
                 () -> assertThat(rma.version()).isEqualTo(version),
                 () -> assertThat(rma.items()).isEqualTo(items),
                 () -> assertThat(rma.inspectorId()).isEqualTo(inspectorId),
                 () -> assertThat(rma.inspectedAt()).isEqualTo(inspectedAt),
-                () -> assertThat(rma.refundAmount()).isNull(),
-                () -> assertThat(rma.deductionTotal()).isNull()
+                () -> assertThat(rma.refundAmount()).isEqualTo(refundAmount),
+                () -> assertThat(rma.deductionTotal()).isEqualTo(deductionTotal)
             );
         }
 
@@ -574,13 +651,13 @@ public class RmaTest {
 
             List<InspectionResult> results = List.of(validInspectionResult());
 
-            InspectionCompleted event = rma.completeInspection(
+            InspectionCompleted event = (InspectionCompleted) rma.completeInspection(
                 INSPECTOR_ID,
                 COMPLETED_AT,
                 results,
                 null,
-                INSPECTION_POLICY
-            );
+                INSPECTION_POLICY, REFUND_POLICY
+            ).getFirst();
 
             assertAll(
                 () -> assertThat(event.inspectorId()).isEqualTo(INSPECTOR_ID),
@@ -600,7 +677,7 @@ public class RmaTest {
                 COMPLETED_AT,
                 results,
                 null,
-                INSPECTION_POLICY
+                INSPECTION_POLICY, REFUND_POLICY
             ))
                 .isInstanceOf(InvalidRmaStateTransitionException.class)
                 .hasMessage("Invalid RMA state transition from REQUESTED to UNDER_INSPECTION");
@@ -659,7 +736,7 @@ public class RmaTest {
                 COMPLETED_AT,
                 List.of(new InspectionResult("item-2", ItemGrade.A, "note", List.of())),
                 null,
-                INSPECTION_POLICY
+                INSPECTION_POLICY, REFUND_POLICY
             ))
                 .isInstanceOfSatisfying(
                     RmaDomainException.class,
@@ -691,7 +768,7 @@ public class RmaTest {
                 COMPLETED_AT,
                 List.of(validInspectionResult(ItemGrade.D)),
                 approvedBy,
-                INSPECTION_POLICY
+                INSPECTION_POLICY, REFUND_POLICY
             ))
                 .isInstanceOfSatisfying(
                     RmaDomainException.class,
@@ -720,18 +797,18 @@ public class RmaTest {
                 validInspectionStarted()
             ));
 
-            InspectionCompleted event = rma.completeInspection(
+            InspectionCompleted event = (InspectionCompleted) rma.completeInspection(
                 INSPECTOR_ID,
                 COMPLETED_AT,
                 List.of(validInspectionResult(ItemGrade.D)),
                 SUPERVISOR_ID,
-                INSPECTION_POLICY
-            );
+                INSPECTION_POLICY, REFUND_POLICY
+            ).getFirst();
 
             assertAll(
                 () -> assertThat(event.approvedBy()).isEqualTo(SUPERVISOR_ID),
                 () -> assertThat(event.results()).hasSize(1),
-                () -> assertThat(rma.version()).isEqualTo(7)
+                () -> assertThat(rma.version()).isEqualTo(8)
             );
         }
 
@@ -739,7 +816,7 @@ public class RmaTest {
         void shouldAllowInspectionWithoutPhotos() {
             Rma rma = rmaUnderInspection();
 
-            InspectionCompleted event = rma.completeInspection(
+            InspectionCompleted event = (InspectionCompleted) rma.completeInspection(
                 INSPECTOR_ID,
                 COMPLETED_AT,
                 List.of(new InspectionResult(
@@ -749,8 +826,8 @@ public class RmaTest {
                     List.of()
                 )),
                 null,
-                INSPECTION_POLICY
-            );
+                INSPECTION_POLICY, REFUND_POLICY
+            ).getFirst();
 
             assertAll(
                 () -> assertThat(event.results().getFirst().photoKeys()).isEmpty(),
@@ -2149,7 +2226,7 @@ public class RmaTest {
                 () -> rma.receive(RECEIVED_AT, WAREHOUSE_ID),
                 () -> rma.startInspection(INSPECTOR_ID, STARTED_AT),
                 () -> rma.completeInspection(INSPECTOR_ID, COMPLETED_AT,
-                    List.of(validInspectionResult()), null, INSPECTION_POLICY),
+                    List.of(validInspectionResult()), null, INSPECTION_POLICY, REFUND_POLICY),
                 () -> rma.decideRefund(DECIDED_AT, REFUND_POLICY),
                 () -> rma.executeRefund(PAYOUT_ID, rma.refundAmount(), 1, EXECUTED_AT),
                 () -> rma.failRefund(FailureCode.TIMEOUT, "Timeout", 1, true, FAILED_AT),

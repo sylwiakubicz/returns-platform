@@ -139,12 +139,13 @@ public final class Rma {
         return inspectionStarted;
     }
 
-    public InspectionCompleted completeInspection(
+    public List<DomainEvent> completeInspection(
         String inspectorId,
         Instant completedAt,
         List<InspectionResult> results,
         String approvedBy,
-        InspectionPolicy policy) {
+        InspectionPolicy policy,
+        RefundPolicy refundPolicy) {
         if (status != RmaStatus.UNDER_INSPECTION) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
         }
@@ -160,8 +161,16 @@ public final class Rma {
             approvedBy
         );
 
+        List<RmaItem> inspectedItems = items.stream()
+            .map(item -> item.withInspection(results.stream()
+                .filter(result -> result.itemId().equals(item.itemId()))
+                .findFirst().orElseThrow()))
+            .toList();
+        RefundDecided refundDecided = calculateRefundDecision(inspectedItems, completedAt, refundPolicy);
+
         apply(inspectionCompleted);
-        return inspectionCompleted;
+        apply(refundDecided);
+        return List.of(inspectionCompleted, refundDecided);
     }
 
     public RefundDecided decideRefund(
@@ -179,7 +188,17 @@ public final class Rma {
             );
         }
 
-        List<ItemRefundDecision> itemDecisions = this.items.stream()
+        RefundDecided event = calculateRefundDecision(items, decidedAt, policy);
+        apply(event);
+        return event;
+    }
+
+    private RefundDecided calculateRefundDecision(
+        List<RmaItem> inspectedItems,
+        Instant decidedAt,
+        RefundPolicy policy
+    ) {
+        List<ItemRefundDecision> itemDecisions = inspectedItems.stream()
             .map(item -> calculateItemRefundDecision(
                 item,
                 policy
@@ -198,17 +217,19 @@ public final class Rma {
             .max(BigDecimal.ZERO);
 
         BigDecimal deductionTotal = calculateDeductionTotal(
+            inspectedItems,
             policy,
             shippingFee
         );
 
 
         RefundDecision decision = determineRefundDecision(
-            this.items,
+            inspectedItems,
             refundAmount
         );
 
         String rejectionReason = determineRejectionReason(
+            inspectedItems,
             decision,
             refundAmount
         );
@@ -221,8 +242,6 @@ public final class Rma {
             rejectionReason,
             decidedAt
         );
-
-        apply(event);
 
         return event;
     }
@@ -708,10 +727,11 @@ public final class Rma {
     }
 
     private BigDecimal calculateDeductionTotal(
+        List<RmaItem> inspectedItems,
         RefundPolicy policy,
         BigDecimal shippingFee
     ) {
-        BigDecimal itemDeductions = this.items.stream()
+        BigDecimal itemDeductions = inspectedItems.stream()
             .map(item -> {
                 int deductionPercent = calculateDeductionPercent(
                     item,
@@ -752,6 +772,7 @@ public final class Rma {
     }
 
     private String determineRejectionReason(
+        List<RmaItem> inspectedItems,
         RefundDecision decision,
         BigDecimal refundAmount
     ) {
@@ -759,7 +780,7 @@ public final class Rma {
             return null;
         }
 
-        boolean allItemsRejected = this.items.stream()
+        boolean allItemsRejected = inspectedItems.stream()
             .allMatch(item -> item.grade() == ItemGrade.D);
 
         if (allItemsRejected) {
