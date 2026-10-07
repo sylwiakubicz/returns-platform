@@ -705,6 +705,32 @@ public class RmaTest {
     @Nested
     class RefundDecisionTests {
         @Test
+        void shouldRejectRefundDecisionBeforeInspectionCompletionForEveryReason() {
+            for (RmaReason reason : RmaReason.values()) {
+                Rma rma = Rma.fromHistory(List.of(
+                    validRmaRequested(reason, List.of(validRequestedItem())),
+                    validLabelIssued(), validPickupScheduled(), validParcelInTransit(),
+                    validParcelReceived(), validInspectionStarted()
+                ));
+                int version = rma.version();
+                List<RmaItem> items = rma.items();
+
+                assertThatThrownBy(() -> rma.decideRefund(DECIDED_AT, REFUND_POLICY))
+                    .isInstanceOfSatisfying(RmaDomainException.class,
+                        exception -> assertThat(exception.code())
+                            .isEqualTo(RmaErrorCode.INCOMPLETE_INSPECTION));
+
+                assertAll(
+                    () -> assertThat(rma.status()).isEqualTo(RmaStatus.UNDER_INSPECTION),
+                    () -> assertThat(rma.version()).isEqualTo(version),
+                    () -> assertThat(rma.items()).isEqualTo(items),
+                    () -> assertThat(rma.refundAmount()).isNull(),
+                    () -> assertThat(rma.deductionTotal()).isNull()
+                );
+            }
+        }
+
+        @Test
         void shouldDecideFullRefundWhenNoItemHasGradeD() {
             Rma rma = rmaAfterInspection();
             RefundDecided refundDecided =  rma.decideRefund(DECIDED_AT, REFUND_POLICY);

@@ -169,6 +169,13 @@ public final class Rma {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.REFUND_PENDING);
         }
 
+        if (inspectedAt == null || items.stream().anyMatch(item -> item.grade() == null)) {
+            throw new RmaDomainException(
+                RmaErrorCode.INCOMPLETE_INSPECTION,
+                "Inspection must be completed before deciding a refund"
+            );
+        }
+
         List<ItemRefundDecision> itemDecisions = this.items.stream()
             .map(item -> calculateItemRefundDecision(
                 item,
