@@ -4,6 +4,8 @@ import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.RequestedItem;
 import dev.rma.returns.domain.enums.RmaReason;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -254,6 +256,33 @@ class RmaRequestedTest {
         assertThatThrownBy(() ->
             event.items().add(validRequestedItem())
         ).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 999, 1000})
+    void shouldAllowCustomerNoteWithinLimit(int length) {
+        String note = "a".repeat(length);
+
+        RmaRequested event = new RmaRequested(
+            RMA_ID, BUSINESS_NUMBER, ORDER_ID, CUSTOMER_ID, DELIVERED_AT,
+            REQUESTED_AT, RmaReason.CHANGED_MIND, note, PLN,
+            List.of(validRequestedItem())
+        );
+
+        assertThat(event.customerNote()).isEqualTo(note);
+    }
+
+    @Test
+    void shouldRejectCustomerNoteExceedingLimit() {
+        String note = "a".repeat(1001);
+
+        assertThatThrownBy(() -> new RmaRequested(
+            RMA_ID, BUSINESS_NUMBER, ORDER_ID, CUSTOMER_ID, DELIVERED_AT,
+            REQUESTED_AT, RmaReason.CHANGED_MIND, note, PLN,
+            List.of(validRequestedItem())
+        ))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("customerNote must not exceed 1000 characters");
     }
 
     private RequestedItem validRequestedItem() {

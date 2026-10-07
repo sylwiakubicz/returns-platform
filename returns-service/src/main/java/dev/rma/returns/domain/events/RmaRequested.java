@@ -32,6 +32,10 @@ public record RmaRequested(
         Objects.requireNonNull(currency, "currency must not be null");
         Objects.requireNonNull(items, "items must not be null");
 
+        if (customerNote != null && customerNote.length() > 1000) {
+            throw new IllegalArgumentException("customerNote must not exceed 1000 characters");
+        }
+
         items = List.copyOf(items);
     }
 }
