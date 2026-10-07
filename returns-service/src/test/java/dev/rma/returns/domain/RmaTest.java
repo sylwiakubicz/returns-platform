@@ -8,6 +8,9 @@ import dev.rma.returns.domain.policy.InspectionPolicy;
 import dev.rma.returns.domain.policy.RefundPolicy;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -665,8 +668,10 @@ public class RmaTest {
                 );
         }
 
-        @Test
-        void shouldRequireSupervisorApprovalForExpensiveRejectedItem() {
+        @ParameterizedTest
+        @NullAndEmptySource
+        @ValueSource(strings = {" ", "   ", "\t", "\n"})
+        void shouldRequireSupervisorApprovalForExpensiveRejectedItem(String approvedBy) {
             List<RequestedItem> items = List.of(validRequestedItem("item-1", PLN, "550.00")) ;
 
             Rma rma = Rma.fromHistory(List.of(
@@ -678,11 +683,14 @@ public class RmaTest {
                 validInspectionStarted()
             ));
 
+            int version = rma.version();
+            List<RmaItem> originalItems = rma.items();
+
             assertThatThrownBy(() -> rma.completeInspection(
                 INSPECTOR_ID,
                 COMPLETED_AT,
                 List.of(validInspectionResult(ItemGrade.D)),
-                null,
+                approvedBy,
                 INSPECTION_POLICY
             ))
                 .isInstanceOfSatisfying(
@@ -690,6 +698,14 @@ public class RmaTest {
                     exception -> assertThat(exception.code())
                         .isEqualTo(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED)
                 );
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.UNDER_INSPECTION),
+                () -> assertThat(rma.version()).isEqualTo(version),
+                () -> assertThat(rma.items()).isEqualTo(originalItems),
+                () -> assertThat(rma.inspectedAt()).isNull(),
+                () -> assertThat(rma.inspectorId()).isNull()
+            );
         }
 
         @Test

@@ -612,7 +612,7 @@ public final class Rma {
                 .orElseThrow();
 
                 if (result.grade() == ItemGrade.D
-                    && approvedBy == null
+                    && (approvedBy == null || approvedBy.isBlank())
                     && item.totalValue().compareTo(policy.supervisorApprovalThreshold()) > 0) {
                     throw new RmaDomainException(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED,
                         "Supervisor approval required");
