@@ -746,6 +746,53 @@ public class RmaTest {
     @Nested
     class RefundDecisionTests {
         @Test
+        void shouldInitializePayoutAttemptForFullAndPartialRefund() {
+            for (ItemGrade secondGrade : List.of(ItemGrade.A, ItemGrade.D)) {
+                Rma rma = Rma.fromHistory(List.of(
+                    validRmaRequested(RmaReason.CHANGED_MIND, List.of(
+                        validRequestedItem("item-1", PLN, "100.00"),
+                        validRequestedItem("item-2", PLN, "100.00")
+                    )),
+                    validLabelIssued(), validPickupScheduled(), validParcelInTransit(),
+                    validParcelReceived(), validInspectionStarted(),
+                    validInspectionCompleted(List.of(
+                        validInspectionResult("item-1", ItemGrade.A),
+                        validInspectionResult("item-2", secondGrade)
+                    ))
+                ));
+                assertThat(rma.payoutAttempt()).isNull();
+
+                rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+                assertThat(rma.status()).isEqualTo(RmaStatus.REFUND_PENDING);
+                assertThat(rma.payoutAttempt()).isEqualTo(1);
+            }
+        }
+
+        @Test
+        void shouldRestoreInitialPayoutAttemptFromRefundDecisionHistory() {
+            assertThat(rmaRefundPending().payoutAttempt()).isEqualTo(1);
+        }
+
+        @Test
+        void shouldNotInitializePayoutAttemptForRejectedRefund() {
+            for (ItemGrade grade : List.of(ItemGrade.A, ItemGrade.D)) {
+                Rma rma = Rma.fromHistory(List.of(
+                    validRmaRequested(RmaReason.CHANGED_MIND,
+                        List.of(validRequestedItem("item-1", PLN, "10.00"))),
+                    validLabelIssued(), validPickupScheduled(), validParcelInTransit(),
+                    validParcelReceived(), validInspectionStarted(),
+                    validInspectionCompleted(List.of(validInspectionResult("item-1", grade)))
+                ));
+
+                rma.decideRefund(DECIDED_AT, REFUND_POLICY);
+
+                assertThat(rma.status()).isEqualTo(RmaStatus.REJECTED);
+                assertThat(rma.payoutAttempt()).isNull();
+            }
+        }
+
+        @Test
         void shouldRejectRefundDecisionBeforeInspectionCompletionForEveryReason() {
             for (RmaReason reason : RmaReason.values()) {
                 Rma rma = Rma.fromHistory(List.of(

@@ -494,6 +494,8 @@ public final class Rma {
 
         if (retryAfterFailure) {
             this.payoutAttempt += 1;
+        } else if (this.status == RmaStatus.REFUND_PENDING) {
+            this.payoutAttempt = 1;
         }
     }
 
