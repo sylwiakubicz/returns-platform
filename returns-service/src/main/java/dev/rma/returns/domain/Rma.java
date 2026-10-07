@@ -148,6 +148,9 @@ public final class Rma {
         if (status != RmaStatus.UNDER_INSPECTION) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
         }
+        if (inspectedAt != null) {
+            throw new IllegalStateException("Inspection has already been completed");
+        }
         validateCompletion(results);
         validateApproval(results, approvedBy, policy);
         InspectionCompleted inspectionCompleted = new InspectionCompleted(

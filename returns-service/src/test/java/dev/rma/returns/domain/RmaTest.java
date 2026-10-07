@@ -525,6 +525,47 @@ public class RmaTest {
     @Nested
     class CompleteInspectionTests {
         @Test
+        void shouldRejectRepeatedInspectionCompletionWithoutChangingState() {
+            Rma rma = rmaUnderInspection();
+            rma.completeInspection(
+                INSPECTOR_ID, COMPLETED_AT, List.of(validInspectionResult()),
+                null, INSPECTION_POLICY
+            );
+
+            assertRepeatedInspectionRejected(rma);
+        }
+
+        @Test
+        void shouldRejectRepeatedInspectionCompletionAfterRestoringHistory() {
+            assertRepeatedInspectionRejected(rmaAfterInspection());
+        }
+
+        private void assertRepeatedInspectionRejected(Rma rma) {
+            int version = rma.version();
+            List<RmaItem> items = rma.items();
+            String inspectorId = rma.inspectorId();
+            Instant inspectedAt = rma.inspectedAt();
+
+            assertThatThrownBy(() -> rma.completeInspection(
+                "other-inspector", COMPLETED_AT.plus(1, ChronoUnit.HOURS),
+                List.of(validInspectionResult(ItemGrade.D)), SUPERVISOR_ID,
+                INSPECTION_POLICY
+            ))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Inspection has already been completed");
+
+            assertAll(
+                () -> assertThat(rma.status()).isEqualTo(RmaStatus.UNDER_INSPECTION),
+                () -> assertThat(rma.version()).isEqualTo(version),
+                () -> assertThat(rma.items()).isEqualTo(items),
+                () -> assertThat(rma.inspectorId()).isEqualTo(inspectorId),
+                () -> assertThat(rma.inspectedAt()).isEqualTo(inspectedAt),
+                () -> assertThat(rma.refundAmount()).isNull(),
+                () -> assertThat(rma.deductionTotal()).isNull()
+            );
+        }
+
+        @Test
         void shouldCompleteInspectionFromUnderInspection() {
             Rma rma = rmaUnderInspection();
 
