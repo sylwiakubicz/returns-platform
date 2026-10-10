@@ -1,16 +1,10 @@
 package dev.rma.returns.domain;
 
+import java.util.Objects;
 
 import dev.rma.returns.domain.enums.ItemGrade;
 
-import java.util.Objects;
-
-public record ItemRefundDecision(
-    String itemId,
-    ItemGrade grade,
-    int deductionPercent,
-    Money refundableAmount
-) {
+public record ItemRefundDecision(String itemId, ItemGrade grade, int deductionPercent, Money refundableAmount) {
     public ItemRefundDecision {
         Objects.requireNonNull(itemId, "itemId must not be null");
         Objects.requireNonNull(grade, "grade must not be null");

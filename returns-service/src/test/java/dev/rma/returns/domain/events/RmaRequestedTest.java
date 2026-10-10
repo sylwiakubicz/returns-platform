@@ -1,11 +1,7 @@
 package dev.rma.returns.domain.events;
 
-import dev.rma.returns.domain.Money;
-import dev.rma.returns.domain.RequestedItem;
-import dev.rma.returns.domain.enums.RmaReason;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -14,12 +10,16 @@ import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+
+import dev.rma.returns.domain.Money;
+import dev.rma.returns.domain.RequestedItem;
+import dev.rma.returns.domain.enums.RmaReason;
 
 class RmaRequestedTest {
-    private static final UUID RMA_ID =
-        UUID.fromString("018f0000-0000-7000-8000-000000000001");
+    private static final UUID RMA_ID = UUID.fromString("018f0000-0000-7000-8000-000000000001");
 
     private static final String ORDER_ID = "order-1";
 
@@ -27,190 +27,178 @@ class RmaRequestedTest {
 
     private static final String BUSINESS_NUMBER = "RMA-2026-000001";
 
-    private static final Instant REQUESTED_AT =
-        Instant.parse("2026-09-10T12:00:00Z");
+    private static final Instant REQUESTED_AT = Instant.parse("2026-09-10T12:00:00Z");
 
-    private static final Instant DELIVERED_AT =
-        Instant.parse("2026-09-01T12:00:00Z");
+    private static final Instant DELIVERED_AT = Instant.parse("2026-09-01T12:00:00Z");
 
     private static final Currency PLN = Currency.getInstance("PLN");
 
     @Test
     void shouldRejectNullRmaId() {
         assertThatThrownBy(() -> new RmaRequested(
-            null,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            "Nie pasuje",
-            PLN,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("rmaId must not be null");
+                        null,
+                        BUSINESS_NUMBER,
+                        ORDER_ID,
+                        CUSTOMER_ID,
+                        DELIVERED_AT,
+                        REQUESTED_AT,
+                        RmaReason.CHANGED_MIND,
+                        "Nie pasuje",
+                        PLN,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("rmaId must not be null");
     }
 
     @Test
     void shouldRejectNullBusinessNumber() {
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID,
-            null,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            "Nie pasuje",
-            PLN,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("businessNumber must not be null");
+                        RMA_ID,
+                        null,
+                        ORDER_ID,
+                        CUSTOMER_ID,
+                        DELIVERED_AT,
+                        REQUESTED_AT,
+                        RmaReason.CHANGED_MIND,
+                        "Nie pasuje",
+                        PLN,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("businessNumber must not be null");
     }
 
     @Test
     void shouldRejectNullOrderId() {
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            null,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            "Nie pasuje",
-            PLN,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("orderId must not be null");
+                        RMA_ID,
+                        BUSINESS_NUMBER,
+                        null,
+                        CUSTOMER_ID,
+                        DELIVERED_AT,
+                        REQUESTED_AT,
+                        RmaReason.CHANGED_MIND,
+                        "Nie pasuje",
+                        PLN,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("orderId must not be null");
     }
 
     @Test
     void shouldRejectNullCustomerId() {
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            null,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            "Nie pasuje",
-            PLN,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("customerId must not be null");
+                        RMA_ID,
+                        BUSINESS_NUMBER,
+                        ORDER_ID,
+                        null,
+                        DELIVERED_AT,
+                        REQUESTED_AT,
+                        RmaReason.CHANGED_MIND,
+                        "Nie pasuje",
+                        PLN,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("customerId must not be null");
     }
 
     @Test
     void shouldRejectNullOrderDeliveredAt() {
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            null,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            "Nie pasuje",
-            PLN,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("orderDeliveredAt must not be null");
+                        RMA_ID,
+                        BUSINESS_NUMBER,
+                        ORDER_ID,
+                        CUSTOMER_ID,
+                        null,
+                        REQUESTED_AT,
+                        RmaReason.CHANGED_MIND,
+                        "Nie pasuje",
+                        PLN,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("orderDeliveredAt must not be null");
     }
 
     @Test
     void shouldRejectNullRequestedAt() {
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            null,
-            RmaReason.CHANGED_MIND,
-            "Nie pasuje",
-            PLN,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("requestedAt must not be null");
+                        RMA_ID,
+                        BUSINESS_NUMBER,
+                        ORDER_ID,
+                        CUSTOMER_ID,
+                        DELIVERED_AT,
+                        null,
+                        RmaReason.CHANGED_MIND,
+                        "Nie pasuje",
+                        PLN,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("requestedAt must not be null");
     }
 
     @Test
     void shouldRejectNullReason() {
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            null,
-            "Nie pasuje",
-            PLN,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("reason must not be null");
+                        RMA_ID,
+                        BUSINESS_NUMBER,
+                        ORDER_ID,
+                        CUSTOMER_ID,
+                        DELIVERED_AT,
+                        REQUESTED_AT,
+                        null,
+                        "Nie pasuje",
+                        PLN,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("reason must not be null");
     }
 
     @Test
     void shouldRejectNullCurrency() {
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            "Nie pasuje",
-            null,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("currency must not be null");
+                        RMA_ID,
+                        BUSINESS_NUMBER,
+                        ORDER_ID,
+                        CUSTOMER_ID,
+                        DELIVERED_AT,
+                        REQUESTED_AT,
+                        RmaReason.CHANGED_MIND,
+                        "Nie pasuje",
+                        null,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("currency must not be null");
     }
 
     @Test
     void shouldRejectNullItems() {
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            "Nie pasuje",
-            PLN,
-            null
-        ))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("items must not be null");
+                        RMA_ID,
+                        BUSINESS_NUMBER,
+                        ORDER_ID,
+                        CUSTOMER_ID,
+                        DELIVERED_AT,
+                        REQUESTED_AT,
+                        RmaReason.CHANGED_MIND,
+                        "Nie pasuje",
+                        PLN,
+                        null))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("items must not be null");
     }
 
     @Test
     void shouldAllowNullCustomerNote() {
         RmaRequested event = new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            null,
-            PLN,
-            List.of(validRequestedItem())
-        );
+                RMA_ID,
+                BUSINESS_NUMBER,
+                ORDER_ID,
+                CUSTOMER_ID,
+                DELIVERED_AT,
+                REQUESTED_AT,
+                RmaReason.CHANGED_MIND,
+                null,
+                PLN,
+                List.of(validRequestedItem()));
 
         assertThat(event.customerNote()).isNull();
     }
@@ -221,41 +209,37 @@ class RmaRequestedTest {
         items.add(validRequestedItem());
 
         RmaRequested event = new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            null,
-            PLN,
-            items
-        );
+                RMA_ID,
+                BUSINESS_NUMBER,
+                ORDER_ID,
+                CUSTOMER_ID,
+                DELIVERED_AT,
+                REQUESTED_AT,
+                RmaReason.CHANGED_MIND,
+                null,
+                PLN,
+                items);
 
         items.add(validRequestedItem());
         assertThat(event.items()).hasSize(1);
-
     }
 
     @Test
     void shouldExposeImmutableItems() {
         RmaRequested event = new RmaRequested(
-            RMA_ID,
-            BUSINESS_NUMBER,
-            ORDER_ID,
-            CUSTOMER_ID,
-            DELIVERED_AT,
-            REQUESTED_AT,
-            RmaReason.CHANGED_MIND,
-            null,
-            PLN,
-            List.of(validRequestedItem())
-        );
+                RMA_ID,
+                BUSINESS_NUMBER,
+                ORDER_ID,
+                CUSTOMER_ID,
+                DELIVERED_AT,
+                REQUESTED_AT,
+                RmaReason.CHANGED_MIND,
+                null,
+                PLN,
+                List.of(validRequestedItem()));
 
-        assertThatThrownBy(() ->
-            event.items().add(validRequestedItem())
-        ).isInstanceOf(UnsupportedOperationException.class);
+        assertThatThrownBy(() -> event.items().add(validRequestedItem()))
+                .isInstanceOf(UnsupportedOperationException.class);
     }
 
     @ParameterizedTest
@@ -264,10 +248,16 @@ class RmaRequestedTest {
         String note = "a".repeat(length);
 
         RmaRequested event = new RmaRequested(
-            RMA_ID, BUSINESS_NUMBER, ORDER_ID, CUSTOMER_ID, DELIVERED_AT,
-            REQUESTED_AT, RmaReason.CHANGED_MIND, note, PLN,
-            List.of(validRequestedItem())
-        );
+                RMA_ID,
+                BUSINESS_NUMBER,
+                ORDER_ID,
+                CUSTOMER_ID,
+                DELIVERED_AT,
+                REQUESTED_AT,
+                RmaReason.CHANGED_MIND,
+                note,
+                PLN,
+                List.of(validRequestedItem()));
 
         assertThat(event.customerNote()).isEqualTo(note);
     }
@@ -277,22 +267,22 @@ class RmaRequestedTest {
         String note = "a".repeat(1001);
 
         assertThatThrownBy(() -> new RmaRequested(
-            RMA_ID, BUSINESS_NUMBER, ORDER_ID, CUSTOMER_ID, DELIVERED_AT,
-            REQUESTED_AT, RmaReason.CHANGED_MIND, note, PLN,
-            List.of(validRequestedItem())
-        ))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessage("customerNote must not exceed 1000 characters");
+                        RMA_ID,
+                        BUSINESS_NUMBER,
+                        ORDER_ID,
+                        CUSTOMER_ID,
+                        DELIVERED_AT,
+                        REQUESTED_AT,
+                        RmaReason.CHANGED_MIND,
+                        note,
+                        PLN,
+                        List.of(validRequestedItem())))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("customerNote must not exceed 1000 characters");
     }
 
     private RequestedItem validRequestedItem() {
         Money money = new Money(new BigDecimal("30.00"), PLN);
-        return new RequestedItem(
-            "item-1",
-            "sku-1",
-            "book",
-            1,
-            money
-        );
+        return new RequestedItem("item-1", "sku-1", "book", 1, money);
     }
 }

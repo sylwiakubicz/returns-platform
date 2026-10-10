@@ -1,21 +1,21 @@
 package dev.rma.returns.domain.policy;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.math.BigDecimal;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
-
-import java.math.BigDecimal;
-
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class RefundPolicyTest {
     @ParameterizedTest
     @CsvSource({"-1,15,40", "101,15,40", "0,-1,40", "0,101,40", "0,15,-1", "0,15,101"})
     void shouldRejectPercentOutsideAllowedRange(int gradeA, int gradeB, int gradeC) {
         assertThatThrownBy(() -> new RefundPolicy(gradeA, gradeB, gradeC, new BigDecimal("15.00")))
-            .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @ParameterizedTest
@@ -31,21 +31,21 @@ class RefundPolicyTest {
     @Test
     void shouldRejectNullShippingFee() {
         assertThatThrownBy(() -> new RefundPolicy(0, 15, 40, null))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("returnShippingFee must not be null");
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("returnShippingFee must not be null");
     }
 
     @Test
     void shouldRejectNegativeShippingFee() {
         assertThatThrownBy(() -> new RefundPolicy(0, 15, 40, new BigDecimal("-15.00")))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessage("returnShippingFee must not be negative");
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("returnShippingFee must not be negative");
     }
 
     @Test
     void shouldRejectShippingFeeRequiringRounding() {
         assertThatThrownBy(() -> new RefundPolicy(0, 15, 40, new BigDecimal("15.001")))
-            .isInstanceOf(ArithmeticException.class);
+                .isInstanceOf(ArithmeticException.class);
     }
 
     @ParameterizedTest

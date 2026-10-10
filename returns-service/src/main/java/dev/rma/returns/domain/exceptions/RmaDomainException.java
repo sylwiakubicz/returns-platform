@@ -1,8 +1,8 @@
 package dev.rma.returns.domain.exceptions;
 
-import dev.rma.returns.domain.enums.RmaErrorCode;
-
 import java.util.Objects;
+
+import dev.rma.returns.domain.enums.RmaErrorCode;
 
 public class RmaDomainException extends RuntimeException {
     private final RmaErrorCode code;

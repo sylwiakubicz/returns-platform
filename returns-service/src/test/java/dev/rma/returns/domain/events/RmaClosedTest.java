@@ -1,11 +1,12 @@
 package dev.rma.returns.domain.events;
 
-import dev.rma.returns.domain.enums.ClosureReason;
-import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import org.junit.jupiter.api.Test;
+
+import dev.rma.returns.domain.enums.ClosureReason;
 
 class RmaClosedTest {
     @Test
@@ -13,14 +14,14 @@ class RmaClosedTest {
         Instant closedAt = Instant.parse("2026-09-21T12:00:00Z");
 
         assertThatThrownBy(() -> new RmaClosed(null, closedAt))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("closureReason must not be null");
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("closureReason must not be null");
     }
 
     @Test
     void shouldRejectNullClosedAt() {
         assertThatThrownBy(() -> new RmaClosed(ClosureReason.REFUND_COMPLETED, null))
-            .isInstanceOf(NullPointerException.class)
-            .hasMessage("closedAt must not be null");
+                .isInstanceOf(NullPointerException.class)
+                .hasMessage("closedAt must not be null");
     }
 }

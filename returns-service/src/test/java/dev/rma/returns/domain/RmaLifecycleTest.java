@@ -1,17 +1,6 @@
 package dev.rma.returns.domain;
 
-import dev.rma.returns.domain.enums.*;
-import dev.rma.returns.domain.events.*;
-import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
-import dev.rma.returns.domain.exceptions.RmaDomainException;
-import dev.rma.returns.domain.policy.InspectionPolicy;
-import dev.rma.returns.domain.policy.RefundPolicy;
-import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.EnumSource;
-import org.junit.jupiter.params.provider.MethodSource;
+import static org.assertj.core.api.Assertions.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -24,7 +13,19 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-import static org.assertj.core.api.Assertions.*;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import dev.rma.returns.domain.enums.*;
+import dev.rma.returns.domain.events.*;
+import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
+import dev.rma.returns.domain.exceptions.RmaDomainException;
+import dev.rma.returns.domain.policy.InspectionPolicy;
+import dev.rma.returns.domain.policy.RefundPolicy;
 
 class RmaLifecycleTest {
     private static final Currency PLN = Currency.getInstance("PLN");
@@ -33,9 +34,20 @@ class RmaLifecycleTest {
     private static final InspectionPolicy INSPECTION_POLICY = new InspectionPolicy(new BigDecimal("500.00"));
 
     private enum Command {
-        ISSUE_LABEL, SCHEDULE_PICKUP, IN_TRANSIT, RECEIVE, START_INSPECTION,
-        COMPLETE_INSPECTION, DECIDE_REFUND, EXECUTE_REFUND, FAIL_REFUND,
-        RETRY_REFUND, EXPIRE, DECLARE_LOST, CANCEL, CLOSE
+        ISSUE_LABEL,
+        SCHEDULE_PICKUP,
+        IN_TRANSIT,
+        RECEIVE,
+        START_INSPECTION,
+        COMPLETE_INSPECTION,
+        DECIDE_REFUND,
+        EXECUTE_REFUND,
+        FAIL_REFUND,
+        RETRY_REFUND,
+        EXPIRE,
+        DECLARE_LOST,
+        CANCEL,
+        CLOSE
     }
 
     @ParameterizedTest(name = "{0}: {1} is forbidden")
@@ -47,7 +59,7 @@ class RmaLifecycleTest {
         Money refundAmount = rma.refundAmount();
 
         assertThatThrownBy(() -> execute(rma, command))
-            .isInstanceOfAny(InvalidRmaStateTransitionException.class, RmaDomainException.class);
+                .isInstanceOfAny(InvalidRmaStateTransitionException.class, RmaDomainException.class);
 
         assertThat(rma.status()).isEqualTo(status);
         assertThat(rma.version()).isEqualTo(version);
@@ -57,8 +69,8 @@ class RmaLifecycleTest {
 
     private static Stream<Arguments> forbiddenTransitions() {
         return Arrays.stream(RmaStatus.values()).flatMap(status -> Arrays.stream(Command.values())
-            .filter(command -> !allowedStates(command).contains(status))
-            .map(command -> Arguments.of(status, command)));
+                .filter(command -> !allowedStates(command).contains(status))
+                .map(command -> Arguments.of(status, command)));
     }
 
     private static Set<RmaStatus> allowedStates(Command command) {
@@ -72,8 +84,13 @@ class RmaLifecycleTest {
             case EXECUTE_REFUND, FAIL_REFUND -> Set.of(RmaStatus.REFUND_PENDING);
             case RETRY_REFUND -> Set.of(RmaStatus.REFUND_FAILED);
             case EXPIRE, CANCEL -> Set.of(RmaStatus.REQUESTED, RmaStatus.LABEL_ISSUED, RmaStatus.PICKUP_SCHEDULED);
-            case CLOSE -> Set.of(RmaStatus.REFUND_FAILED, RmaStatus.REFUNDED, RmaStatus.REJECTED,
-                RmaStatus.EXPIRED, RmaStatus.LOST, RmaStatus.CANCELLED);
+            case CLOSE -> Set.of(
+                    RmaStatus.REFUND_FAILED,
+                    RmaStatus.REFUNDED,
+                    RmaStatus.REJECTED,
+                    RmaStatus.EXPIRED,
+                    RmaStatus.LOST,
+                    RmaStatus.CANCELLED);
         };
     }
 
@@ -84,8 +101,8 @@ class RmaLifecycleTest {
             case IN_TRANSIT -> rma.markParcelInTransit(AT);
             case RECEIVE -> rma.receive(AT, "warehouse");
             case START_INSPECTION -> rma.startInspection("inspector", AT);
-            case COMPLETE_INSPECTION -> rma.completeInspection("inspector", AT,
-                results(ItemGrade.A), null, INSPECTION_POLICY, REFUND_POLICY);
+            case COMPLETE_INSPECTION -> rma.completeInspection(
+                    "inspector", AT, results(ItemGrade.A), null, INSPECTION_POLICY, REFUND_POLICY);
             case DECIDE_REFUND -> rma.decideRefund(AT, REFUND_POLICY);
             case EXECUTE_REFUND -> rma.executeRefund("payout", money("85.00"), 1, AT);
             case FAIL_REFUND -> rma.failRefund(FailureCode.INVALID_ACCOUNT, "Invalid account", 1, false, AT);
@@ -187,7 +204,7 @@ class RmaLifecycleTest {
     void shouldRejectEveryCommandAfterClosure(Command command) {
         Rma rma = Rma.fromHistory(positiveHistory());
         assertThatThrownBy(() -> execute(rma, command))
-            .isInstanceOfAny(InvalidRmaStateTransitionException.class, RmaDomainException.class);
+                .isInstanceOfAny(InvalidRmaStateTransitionException.class, RmaDomainException.class);
         assertThat(rma.status()).isEqualTo(RmaStatus.CLOSED);
         assertThat(rma.version()).isEqualTo(10);
     }
@@ -201,11 +218,11 @@ class RmaLifecycleTest {
 
     @Test
     void shouldRequireExecutedAmountToMatchDecisionIncludingCurrency() {
-        for (Money wrong : List.of(money("84.99"), money("85.01"),
-            new Money(new BigDecimal("85.00"), Currency.getInstance("EUR")))) {
+        for (Money wrong : List.of(
+                money("84.99"), money("85.01"), new Money(new BigDecimal("85.00"), Currency.getInstance("EUR")))) {
             Rma rma = Rma.fromHistory(historyFor(RmaStatus.REFUND_PENDING));
             assertThatThrownBy(() -> rma.executeRefund("payout", wrong, 1, AT))
-                .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOf(IllegalArgumentException.class);
             assertThat(rma.status()).isEqualTo(RmaStatus.REFUND_PENDING);
             assertThat(rma.version()).isEqualTo(8);
             assertThat(rma.payoutId()).isNull();
@@ -221,8 +238,9 @@ class RmaLifecycleTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = RmaStatus.class,
-        names = {"REFUNDED", "REJECTED", "EXPIRED", "LOST", "CANCELLED", "REFUND_FAILED"})
+    @EnumSource(
+            value = RmaStatus.class,
+            names = {"REFUNDED", "REJECTED", "EXPIRED", "LOST", "CANCELLED", "REFUND_FAILED"})
     void shouldAllowClosingEveryTerminalOutcome(RmaStatus status) {
         Rma rma = Rma.fromHistory(historyFor(status));
         int version = rma.version();
@@ -233,16 +251,21 @@ class RmaLifecycleTest {
 
     @Test
     void shouldHandleThreeItemsWithOneRejectedAsPartialRefund() {
-        RmaRequested requested = requested(RmaReason.CHANGED_MIND, List.of(
-            item("one", "100.00"), item("two", "100.00"), item("three", "100.00")));
+        RmaRequested requested = requested(
+                RmaReason.CHANGED_MIND, List.of(item("one", "100.00"), item("two", "100.00"), item("three", "100.00")));
         List<DomainEvent> history = new ArrayList<>(historyFor(RmaStatus.UNDER_INSPECTION));
         history.set(0, requested);
         Rma rma = Rma.fromHistory(history);
-        List<DomainEvent> events = rma.completeInspection("inspector", AT, List.of(
-            new InspectionResult("one", ItemGrade.A, null, null),
-            new InspectionResult("two", ItemGrade.C, null, null),
-            new InspectionResult("three", ItemGrade.D, null, null)
-        ), null, INSPECTION_POLICY, REFUND_POLICY);
+        List<DomainEvent> events = rma.completeInspection(
+                "inspector",
+                AT,
+                List.of(
+                        new InspectionResult("one", ItemGrade.A, null, null),
+                        new InspectionResult("two", ItemGrade.C, null, null),
+                        new InspectionResult("three", ItemGrade.D, null, null)),
+                null,
+                INSPECTION_POLICY,
+                REFUND_POLICY);
         assertThat(((RefundDecided) events.getLast()).decision()).isEqualTo(RefundDecision.PARTIAL);
         assertThat(rma.refundAmount()).isEqualTo(money("145.00"));
         assertThat(rma.items().getLast().refundableAmount().amount()).isZero();
@@ -264,8 +287,8 @@ class RmaLifecycleTest {
         events.add(rma.markParcelInTransit(AT));
         events.add(rma.receive(AT, "warehouse"));
         events.add(rma.startInspection("inspector", AT));
-        events.addAll(rma.completeInspection("inspector", AT, results(ItemGrade.A),
-            null, INSPECTION_POLICY, REFUND_POLICY));
+        events.addAll(
+                rma.completeInspection("inspector", AT, results(ItemGrade.A), null, INSPECTION_POLICY, REFUND_POLICY));
         events.add(rma.executeRefund("payout", rma.refundAmount(), 1, AT));
         events.add(rma.close(ClosureReason.REFUND_COMPLETED, AT));
         assertThat(rma.status()).isEqualTo(RmaStatus.CLOSED);
@@ -308,9 +331,13 @@ class RmaLifecycleTest {
         history.add(new InspectionStarted("inspector", AT));
         if (status == RmaStatus.UNDER_INSPECTION) return history;
         Rma rma = Rma.fromHistory(history);
-        history.addAll(rma.completeInspection("inspector", AT,
-            results(status == RmaStatus.REJECTED ? ItemGrade.D : ItemGrade.A),
-            null, INSPECTION_POLICY, REFUND_POLICY));
+        history.addAll(rma.completeInspection(
+                "inspector",
+                AT,
+                results(status == RmaStatus.REJECTED ? ItemGrade.D : ItemGrade.A),
+                null,
+                INSPECTION_POLICY,
+                REFUND_POLICY));
         if (status == RmaStatus.REFUND_FAILED) {
             history.add(rma.failRefund(FailureCode.INVALID_ACCOUNT, "Invalid account", 1, false, AT));
         } else if (status == RmaStatus.REFUNDED) {
@@ -332,9 +359,18 @@ class RmaLifecycleTest {
     }
 
     private static RmaRequested requested(RmaReason reason, List<RequestedItem> items) {
-        return Rma.request(UUID.fromString("018f0000-0000-7000-8000-000000000001"),
-            "RMA-2026-000001", "order", "customer", AT.minusSeconds(86400),
-            reason, null, items, PLN, AT, 14);
+        return Rma.request(
+                UUID.fromString("018f0000-0000-7000-8000-000000000001"),
+                "RMA-2026-000001",
+                "order",
+                "customer",
+                AT.minusSeconds(86400),
+                reason,
+                null,
+                items,
+                PLN,
+                AT,
+                14);
     }
 
     private static RequestedItem item(String id, String price) {

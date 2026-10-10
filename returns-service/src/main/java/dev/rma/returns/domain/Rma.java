@@ -1,18 +1,18 @@
 package dev.rma.returns.domain;
 
-import dev.rma.returns.domain.enums.*;
-import dev.rma.returns.domain.events.*;
-import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
-import dev.rma.returns.domain.exceptions.RmaDomainException;
-import dev.rma.returns.domain.policy.InspectionPolicy;
-import dev.rma.returns.domain.policy.RefundPolicy;
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.*;
+
+import dev.rma.returns.domain.enums.*;
+import dev.rma.returns.domain.events.*;
+import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
+import dev.rma.returns.domain.exceptions.RmaDomainException;
+import dev.rma.returns.domain.policy.InspectionPolicy;
+import dev.rma.returns.domain.policy.RefundPolicy;
 
 public final class Rma {
     private UUID rmaId;
@@ -41,57 +41,38 @@ public final class Rma {
     private Instant closedAt;
     private ClosureReason closureReason;
 
-
     public static RmaRequested request(
-        UUID rmaId,
-        String businessNumber,
-        String orderId,
-        String customerId,
-        Instant orderDeliveredAt,
-        RmaReason reason,
-        String customerNote,
-        List<RequestedItem> items,
-        Currency currency,
-        Instant requestedAt,
-        int returnWindowDays
-    ) {
-        validateRequest(
-            orderDeliveredAt,
-            requestedAt,
-            items,
-            currency,
-            returnWindowDays
-        );
+            UUID rmaId,
+            String businessNumber,
+            String orderId,
+            String customerId,
+            Instant orderDeliveredAt,
+            RmaReason reason,
+            String customerNote,
+            List<RequestedItem> items,
+            Currency currency,
+            Instant requestedAt,
+            int returnWindowDays) {
+        validateRequest(orderDeliveredAt, requestedAt, items, currency, returnWindowDays);
 
         return new RmaRequested(
-            rmaId,
-            businessNumber,
-            orderId,
-            customerId,
-            orderDeliveredAt,
-            requestedAt,
-            reason,
-            customerNote,
-            currency,
-            items
-        );
+                rmaId,
+                businessNumber,
+                orderId,
+                customerId,
+                orderDeliveredAt,
+                requestedAt,
+                reason,
+                customerNote,
+                currency,
+                items);
     }
 
-    public LabelIssued issueLabel(
-        String labelId,
-        String trackingNumber,
-        String labelFileKey,
-        Instant issuedAt
-    ) {
+    public LabelIssued issueLabel(String labelId, String trackingNumber, String labelFileKey, Instant issuedAt) {
         if (status != RmaStatus.REQUESTED) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.LABEL_ISSUED);
         }
-        LabelIssued labelIssued =  new LabelIssued(
-            labelId,
-            trackingNumber,
-            labelFileKey,
-            issuedAt
-        );
+        LabelIssued labelIssued = new LabelIssued(labelId, trackingNumber, labelFileKey, issuedAt);
 
         apply(labelIssued);
 
@@ -140,12 +121,12 @@ public final class Rma {
     }
 
     public List<DomainEvent> completeInspection(
-        String inspectorId,
-        Instant completedAt,
-        List<InspectionResult> results,
-        String approvedBy,
-        InspectionPolicy policy,
-        RefundPolicy refundPolicy) {
+            String inspectorId,
+            Instant completedAt,
+            List<InspectionResult> results,
+            String approvedBy,
+            InspectionPolicy policy,
+            RefundPolicy refundPolicy) {
         if (status != RmaStatus.UNDER_INSPECTION) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
         }
@@ -154,18 +135,15 @@ public final class Rma {
         }
         validateCompletion(results);
         validateApproval(results, approvedBy, policy);
-        InspectionCompleted inspectionCompleted = new InspectionCompleted(
-            inspectorId,
-            completedAt,
-            results,
-            approvedBy
-        );
+        InspectionCompleted inspectionCompleted =
+                new InspectionCompleted(inspectorId, completedAt, results, approvedBy);
 
         List<RmaItem> inspectedItems = items.stream()
-            .map(item -> item.withInspection(results.stream()
-                .filter(result -> result.itemId().equals(item.itemId()))
-                .findFirst().orElseThrow()))
-            .toList();
+                .map(item -> item.withInspection(results.stream()
+                        .filter(result -> result.itemId().equals(item.itemId()))
+                        .findFirst()
+                        .orElseThrow()))
+                .toList();
         RefundDecided refundDecided = calculateRefundDecision(inspectedItems, completedAt, refundPolicy);
 
         apply(inspectionCompleted);
@@ -173,19 +151,14 @@ public final class Rma {
         return List.of(inspectionCompleted, refundDecided);
     }
 
-    public RefundDecided decideRefund(
-        Instant decidedAt,
-        RefundPolicy policy
-    ) {
+    public RefundDecided decideRefund(Instant decidedAt, RefundPolicy policy) {
         if (status != RmaStatus.UNDER_INSPECTION) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.REFUND_PENDING);
         }
 
         if (inspectedAt == null || items.stream().anyMatch(item -> item.grade() == null)) {
             throw new RmaDomainException(
-                RmaErrorCode.INCOMPLETE_INSPECTION,
-                "Inspection must be completed before deciding a refund"
-            );
+                    RmaErrorCode.INCOMPLETE_INSPECTION, "Inspection must be completed before deciding a refund");
         }
 
         RefundDecided event = calculateRefundDecision(items, decidedAt, policy);
@@ -194,79 +167,42 @@ public final class Rma {
     }
 
     private RefundDecided calculateRefundDecision(
-        List<RmaItem> inspectedItems,
-        Instant decidedAt,
-        RefundPolicy policy
-    ) {
+            List<RmaItem> inspectedItems, Instant decidedAt, RefundPolicy policy) {
         List<ItemRefundDecision> itemDecisions = inspectedItems.stream()
-            .map(item -> calculateItemRefundDecision(
-                item,
-                policy
-            ))
-            .toList();
+                .map(item -> calculateItemRefundDecision(item, policy))
+                .toList();
 
         BigDecimal sumItems = calculateSumItems(itemDecisions);
 
-        BigDecimal shippingFee = calculateShippingFee(
-            sumItems,
-            policy
-        );
+        BigDecimal shippingFee = calculateShippingFee(sumItems, policy);
 
-        BigDecimal refundAmount = sumItems
-            .subtract(shippingFee)
-            .max(BigDecimal.ZERO);
+        BigDecimal refundAmount = sumItems.subtract(shippingFee).max(BigDecimal.ZERO);
 
-        BigDecimal deductionTotal = calculateDeductionTotal(
-            inspectedItems,
-            policy,
-            shippingFee
-        );
+        BigDecimal deductionTotal = calculateDeductionTotal(inspectedItems, policy, shippingFee);
 
+        RefundDecision decision = determineRefundDecision(inspectedItems, refundAmount);
 
-        RefundDecision decision = determineRefundDecision(
-            inspectedItems,
-            refundAmount
-        );
-
-        String rejectionReason = determineRejectionReason(
-            inspectedItems,
-            decision,
-            refundAmount
-        );
+        String rejectionReason = determineRejectionReason(inspectedItems, decision, refundAmount);
 
         RefundDecided event = new RefundDecided(
-            decision,
-            new Money(refundAmount, this.currency),
-            new Money(deductionTotal, this.currency),
-            itemDecisions,
-            rejectionReason,
-            decidedAt
-        );
+                decision,
+                new Money(refundAmount, this.currency),
+                new Money(deductionTotal, this.currency),
+                itemDecisions,
+                rejectionReason,
+                decidedAt);
 
         return event;
     }
 
-    public RefundExecuted executeRefund(
-        String payoutId,
-        Money amount,
-        int attempt,
-        Instant executedAt
-    ) {
+    public RefundExecuted executeRefund(String payoutId, Money amount, int attempt, Instant executedAt) {
         if (status != RmaStatus.REFUND_PENDING) {
-            throw new InvalidRmaStateTransitionException(
-                status,
-                RmaStatus.REFUNDED
-            );
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.REFUNDED);
         }
 
         validateExecutedRefundAmount(amount);
 
-        RefundExecuted event = new RefundExecuted(
-            payoutId,
-            amount,
-            attempt,
-            executedAt
-        );
+        RefundExecuted event = new RefundExecuted(payoutId, amount, attempt, executedAt);
 
         apply(event);
 
@@ -274,67 +210,38 @@ public final class Rma {
     }
 
     public RefundFailed failRefund(
-        FailureCode failureCode,
-        String failureMessage,
-        int attempt,
-        boolean retryable,
-        Instant failedAt
-    ) {
+            FailureCode failureCode, String failureMessage, int attempt, boolean retryable, Instant failedAt) {
         if (status != RmaStatus.REFUND_PENDING) {
-            throw new InvalidRmaStateTransitionException(
-                status,
-                RmaStatus.REFUND_FAILED
-            );
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.REFUND_FAILED);
         }
 
-        RefundFailed event = new RefundFailed(
-            failureCode,
-            failureMessage,
-            attempt,
-            retryable,
-            failedAt
-        );
+        RefundFailed event = new RefundFailed(failureCode, failureMessage, attempt, retryable, failedAt);
 
         apply(event);
 
         return event;
     }
+
     public RefundDecided retryRefund(Instant decidedAt) {
         if (status != RmaStatus.REFUND_FAILED) {
-            throw new InvalidRmaStateTransitionException(
-                status,
-                RmaStatus.REFUND_PENDING
-            );
+            throw new InvalidRmaStateTransitionException(status, RmaStatus.REFUND_PENDING);
         }
 
         List<ItemRefundDecision> itemDecisions = items.stream()
-            .map(item -> new ItemRefundDecision(
-                item.itemId(),
-                item.grade(),
-                item.deductionPercent(),
-                item.refundableAmount()
-            ))
-            .toList();
+                .map(item -> new ItemRefundDecision(
+                        item.itemId(), item.grade(), item.deductionPercent(), item.refundableAmount()))
+                .toList();
 
         RefundDecided event = new RefundDecided(
-            currentRefundDecision(),
-            refundAmount,
-            deductionTotal,
-            itemDecisions,
-            null,
-            decidedAt
-        );
+                currentRefundDecision(), refundAmount, deductionTotal, itemDecisions, null, decidedAt);
 
         apply(event);
 
         return event;
     }
 
-
     public RmaExpired expire(Instant expiredAt, int daysSinceRequest) {
-        if (status != RmaStatus.REQUESTED
-            && status != RmaStatus.LABEL_ISSUED
-            && status != RmaStatus.PICKUP_SCHEDULED) {
+        if (status != RmaStatus.REQUESTED && status != RmaStatus.LABEL_ISSUED && status != RmaStatus.PICKUP_SCHEDULED) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.EXPIRED);
         }
 
@@ -354,13 +261,9 @@ public final class Rma {
     }
 
     public RmaCancelled cancel(String cancelledBy, Instant cancelledAt, String reason) {
-        if (status != RmaStatus.REQUESTED
-            && status != RmaStatus.LABEL_ISSUED
-            && status != RmaStatus.PICKUP_SCHEDULED) {
+        if (status != RmaStatus.REQUESTED && status != RmaStatus.LABEL_ISSUED && status != RmaStatus.PICKUP_SCHEDULED) {
             throw new RmaDomainException(
-                RmaErrorCode.CANCELLATION_NOT_ALLOWED,
-                "Cancellation is not allowed in state " + status
-            );
+                    RmaErrorCode.CANCELLATION_NOT_ALLOWED, "Cancellation is not allowed in state " + status);
         }
 
         RmaCancelled event = new RmaCancelled(cancelledBy, cancelledAt, reason);
@@ -369,15 +272,16 @@ public final class Rma {
     }
 
     public RmaClosed close(ClosureReason closureReason, Instant closedAt) {
-        ClosureReason expectedReason = switch (status) {
-            case REFUNDED -> ClosureReason.REFUND_COMPLETED;
-            case REJECTED -> ClosureReason.REJECTED_AFTER_INSPECTION;
-            case EXPIRED -> ClosureReason.EXPIRED_NO_SHIPMENT;
-            case LOST -> ClosureReason.PARCEL_LOST;
-            case CANCELLED -> ClosureReason.CANCELLED_BY_CUSTOMER;
-            case REFUND_FAILED -> ClosureReason.CLOSED_BY_OPERATOR;
-            default -> throw new InvalidRmaStateTransitionException(status, RmaStatus.CLOSED);
-        };
+        ClosureReason expectedReason =
+                switch (status) {
+                    case REFUNDED -> ClosureReason.REFUND_COMPLETED;
+                    case REJECTED -> ClosureReason.REJECTED_AFTER_INSPECTION;
+                    case EXPIRED -> ClosureReason.EXPIRED_NO_SHIPMENT;
+                    case LOST -> ClosureReason.PARCEL_LOST;
+                    case CANCELLED -> ClosureReason.CANCELLED_BY_CUSTOMER;
+                    case REFUND_FAILED -> ClosureReason.CLOSED_BY_OPERATOR;
+                    default -> throw new InvalidRmaStateTransitionException(status, RmaStatus.CLOSED);
+                };
 
         RmaClosed event = new RmaClosed(closureReason, closedAt);
         if (closureReason != expectedReason) {
@@ -476,16 +380,15 @@ public final class Rma {
         this.inspectedAt = inspectionCompleted.completedAt();
 
         this.items = this.items.stream()
-            .map( item -> {
+                .map(item -> {
                     InspectionResult result = inspectionCompleted.results().stream()
-                    .filter(r -> r. itemId().equals(item.itemId()))
-                    .findFirst()
-                    .orElseThrow();
+                            .filter(r -> r.itemId().equals(item.itemId()))
+                            .findFirst()
+                            .orElseThrow();
 
                     return item.withInspection(result);
-                }
-            )
-            .toList();
+                })
+                .toList();
     }
 
     private void apply(RefundDecided refundDecided) {
@@ -493,23 +396,22 @@ public final class Rma {
 
         this.version += 1;
 
-        this.status = refundDecided.decision() == RefundDecision.REJECTED
-            ? RmaStatus.REJECTED
-            : RmaStatus.REFUND_PENDING;
+        this.status =
+                refundDecided.decision() == RefundDecision.REJECTED ? RmaStatus.REJECTED : RmaStatus.REFUND_PENDING;
 
         this.refundAmount = refundDecided.refundAmount();
         this.deductionTotal = refundDecided.deductionTotal();
 
         this.items = this.items.stream()
-            .map(item -> {
-                ItemRefundDecision itemRefundDecision = refundDecided.itemDecisions().stream()
-                    .filter(decision -> decision.itemId().equals(item.itemId()))
-                    .findFirst()
-                    .orElseThrow();
+                .map(item -> {
+                    ItemRefundDecision itemRefundDecision = refundDecided.itemDecisions().stream()
+                            .filter(decision -> decision.itemId().equals(item.itemId()))
+                            .findFirst()
+                            .orElseThrow();
 
-                return item.withRefundDecision(itemRefundDecision);
-            })
-            .toList();
+                    return item.withRefundDecision(itemRefundDecision);
+                })
+                .toList();
 
         if (retryAfterFailure) {
             this.payoutAttempt += 1;
@@ -560,54 +462,42 @@ public final class Rma {
 
     private RmaItem mapItem(RequestedItem requestedItem) {
         return new RmaItem(
-            requestedItem.itemId(),
-            requestedItem.sku(),
-            requestedItem.name(),
-            requestedItem.quantity(),
-            requestedItem.unitPrice(),
-            null,
-            null,
-            null,
-            null,
-            null
-        );
+                requestedItem.itemId(),
+                requestedItem.sku(),
+                requestedItem.name(),
+                requestedItem.quantity(),
+                requestedItem.unitPrice(),
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     private static void validateRequest(
-        Instant orderDeliveredAt,
-        Instant requestedAt,
-        List<RequestedItem> items,
-        Currency currency,
-        int returnWindowDays
-    ) {
+            Instant orderDeliveredAt,
+            Instant requestedAt,
+            List<RequestedItem> items,
+            Currency currency,
+            int returnWindowDays) {
         Objects.requireNonNull(orderDeliveredAt, "orderDeliveredAt must not be null");
         Objects.requireNonNull(requestedAt, "requestedAt must not be null");
         Objects.requireNonNull(items, "items must not be null");
         Objects.requireNonNull(currency, "currency must not be null");
 
-        Instant returnDeadline =
-            orderDeliveredAt.plus(Duration.ofDays(returnWindowDays));
+        Instant returnDeadline = orderDeliveredAt.plus(Duration.ofDays(returnWindowDays));
 
         if (requestedAt.isAfter(returnDeadline)) {
-            throw new RmaDomainException(
-                RmaErrorCode.RETURN_WINDOW_EXPIRED,
-                "Return window has expired"
-            );
+            throw new RmaDomainException(RmaErrorCode.RETURN_WINDOW_EXPIRED, "Return window has expired");
         }
 
         if (items.isEmpty()) {
-            throw new RmaDomainException(
-                RmaErrorCode.NO_ITEMS,
-                "There must be at least 1 item"
-            );
+            throw new RmaDomainException(RmaErrorCode.NO_ITEMS, "There must be at least 1 item");
         }
 
         for (RequestedItem item : items) {
             if (!item.unitPrice().currency().equals(currency)) {
-                throw new RmaDomainException(
-                    RmaErrorCode.MIXED_CURRENCIES,
-                    "Mixed currencies are forbidden"
-                );
+                throw new RmaDomainException(RmaErrorCode.MIXED_CURRENCIES, "Mixed currencies are forbidden");
             }
         }
     }
@@ -626,45 +516,28 @@ public final class Rma {
     private void validateApproval(List<InspectionResult> results, String approvedBy, InspectionPolicy policy) {
         results.forEach(result -> {
             RmaItem item = this.items.stream()
-                .filter(i -> i.itemId().equals(result.itemId()))
-                .findFirst()
-                .orElseThrow();
+                    .filter(i -> i.itemId().equals(result.itemId()))
+                    .findFirst()
+                    .orElseThrow();
 
-                if (result.grade() == ItemGrade.D
+            if (result.grade() == ItemGrade.D
                     && (approvedBy == null || approvedBy.isBlank())
                     && item.totalValue().compareTo(policy.supervisorApprovalThreshold()) > 0) {
-                    throw new RmaDomainException(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED,
-                        "Supervisor approval required");
-                }
+                throw new RmaDomainException(RmaErrorCode.SUPERVISOR_APPROVAL_REQUIRED, "Supervisor approval required");
+            }
         });
     }
 
-    private ItemRefundDecision calculateItemRefundDecision(
-        RmaItem item,
-        RefundPolicy policy
-    ) {
-        int deductionPercent = calculateDeductionPercent(
-            item,
-            policy
-        );
+    private ItemRefundDecision calculateItemRefundDecision(RmaItem item, RefundPolicy policy) {
+        int deductionPercent = calculateDeductionPercent(item, policy);
 
-        BigDecimal refundableAmount = calculateRefundableAmount(
-            item,
-            deductionPercent
-        );
+        BigDecimal refundableAmount = calculateRefundableAmount(item, deductionPercent);
 
         return new ItemRefundDecision(
-            item.itemId(),
-            item.grade(),
-            deductionPercent,
-            new Money(refundableAmount, this.currency)
-        );
+                item.itemId(), item.grade(), deductionPercent, new Money(refundableAmount, this.currency));
     }
 
-    private int calculateDeductionPercent(
-        RmaItem item,
-        RefundPolicy policy
-    ) {
+    private int calculateDeductionPercent(RmaItem item, RefundPolicy policy) {
         if (this.reason != RmaReason.CHANGED_MIND) {
             return 0;
         }
@@ -677,49 +550,32 @@ public final class Rma {
         };
     }
 
-    private BigDecimal calculateRefundableAmount(
-        RmaItem item,
-        int deductionPercent
-    ) {
+    private BigDecimal calculateRefundableAmount(RmaItem item, int deductionPercent) {
         if (item.grade() == ItemGrade.D) {
             return new BigDecimal("0.00");
         }
 
-        BigDecimal deduction = calculateItemDeduction(
-            item,
-            deductionPercent
-        );
+        BigDecimal deduction = calculateItemDeduction(item, deductionPercent);
 
-        return item.totalValue()
-            .subtract(deduction)
-            .setScale(2, RoundingMode.HALF_UP);
+        return item.totalValue().subtract(deduction).setScale(2, RoundingMode.HALF_UP);
     }
 
-    private BigDecimal calculateItemDeduction(
-        RmaItem item,
-        int deductionPercent
-    ) {
+    private BigDecimal calculateItemDeduction(RmaItem item, int deductionPercent) {
         return item.totalValue()
-            .multiply(BigDecimal.valueOf(deductionPercent))
-            .divide(BigDecimal.valueOf(100))
-            .setScale(2, RoundingMode.HALF_UP);
+                .multiply(BigDecimal.valueOf(deductionPercent))
+                .divide(BigDecimal.valueOf(100))
+                .setScale(2, RoundingMode.HALF_UP);
     }
 
-    private BigDecimal calculateSumItems(
-        List<ItemRefundDecision> itemDecisions
-    ) {
+    private BigDecimal calculateSumItems(List<ItemRefundDecision> itemDecisions) {
         return itemDecisions.stream()
-            .map(ItemRefundDecision::refundableAmount)
-            .map(Money::amount)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                .map(ItemRefundDecision::refundableAmount)
+                .map(Money::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    private BigDecimal calculateShippingFee(
-        BigDecimal sumItems,
-        RefundPolicy policy
-    ) {
-        if (this.reason == RmaReason.CHANGED_MIND
-            && sumItems.compareTo(BigDecimal.ZERO) > 0) {
+    private BigDecimal calculateShippingFee(BigDecimal sumItems, RefundPolicy policy) {
+        if (this.reason == RmaReason.CHANGED_MIND && sumItems.compareTo(BigDecimal.ZERO) > 0) {
             return policy.returnShippingFee();
         }
 
@@ -727,38 +583,25 @@ public final class Rma {
     }
 
     private BigDecimal calculateDeductionTotal(
-        List<RmaItem> inspectedItems,
-        RefundPolicy policy,
-        BigDecimal shippingFee
-    ) {
+            List<RmaItem> inspectedItems, RefundPolicy policy, BigDecimal shippingFee) {
         BigDecimal itemDeductions = inspectedItems.stream()
-            .map(item -> {
-                int deductionPercent = calculateDeductionPercent(
-                    item,
-                    policy
-                );
+                .map(item -> {
+                    int deductionPercent = calculateDeductionPercent(item, policy);
 
-                return calculateItemDeduction(
-                    item,
-                    deductionPercent
-                );
-            })
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+                    return calculateItemDeduction(item, deductionPercent);
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         return itemDeductions.add(shippingFee);
     }
 
-    private RefundDecision determineRefundDecision(
-        List<RmaItem> items,
-        BigDecimal refundAmount
-    ) {
+    private RefundDecision determineRefundDecision(List<RmaItem> items, BigDecimal refundAmount) {
         if (refundAmount.compareTo(BigDecimal.ZERO) == 0) {
             return RefundDecision.REJECTED;
         }
 
-        long itemsWithGradeD = items.stream()
-            .filter(item -> item.grade() == ItemGrade.D)
-            .count();
+        long itemsWithGradeD =
+                items.stream().filter(item -> item.grade() == ItemGrade.D).count();
 
         if (itemsWithGradeD == 0) {
             return RefundDecision.FULL;
@@ -772,16 +615,12 @@ public final class Rma {
     }
 
     private String determineRejectionReason(
-        List<RmaItem> inspectedItems,
-        RefundDecision decision,
-        BigDecimal refundAmount
-    ) {
+            List<RmaItem> inspectedItems, RefundDecision decision, BigDecimal refundAmount) {
         if (decision != RefundDecision.REJECTED) {
             return null;
         }
 
-        boolean allItemsRejected = inspectedItems.stream()
-            .allMatch(item -> item.grade() == ItemGrade.D);
+        boolean allItemsRejected = inspectedItems.stream().allMatch(item -> item.grade() == ItemGrade.D);
 
         if (allItemsRejected) {
             return "All items rejected after inspection";
@@ -797,26 +636,19 @@ public final class Rma {
     private void validateExecutedRefundAmount(Money amount) {
         Objects.requireNonNull(amount, "amount must not be null");
 
-        boolean sameCurrency =
-            amount.currency().equals(refundAmount.currency());
+        boolean sameCurrency = amount.currency().equals(refundAmount.currency());
 
-        boolean sameAmount =
-            amount.amount().compareTo(refundAmount.amount()) == 0;
+        boolean sameAmount = amount.amount().compareTo(refundAmount.amount()) == 0;
 
         if (!sameCurrency || !sameAmount) {
-            throw new IllegalArgumentException(
-                "Executed refund amount must match decided refund amount"
-            );
+            throw new IllegalArgumentException("Executed refund amount must match decided refund amount");
         }
     }
 
     private RefundDecision currentRefundDecision() {
-        boolean hasRejectedItem = items.stream()
-            .anyMatch(item -> item.grade() == ItemGrade.D);
+        boolean hasRejectedItem = items.stream().anyMatch(item -> item.grade() == ItemGrade.D);
 
-        return hasRejectedItem
-            ? RefundDecision.PARTIAL
-            : RefundDecision.FULL;
+        return hasRejectedItem ? RefundDecision.PARTIAL : RefundDecision.FULL;
     }
 
     public UUID rmaId() {

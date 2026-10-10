@@ -1,16 +1,11 @@
 package dev.rma.returns.domain;
 
-import dev.rma.returns.domain.enums.ItemGrade;
-
 import java.util.List;
 import java.util.Objects;
 
-public record InspectionResult(
-    String itemId,
-    ItemGrade grade,
-    String note,
-    List<String> photoKeys
-) {
+import dev.rma.returns.domain.enums.ItemGrade;
+
+public record InspectionResult(String itemId, ItemGrade grade, String note, List<String> photoKeys) {
     public InspectionResult {
         Objects.requireNonNull(itemId, "itemId must not be null");
         Objects.requireNonNull(grade, "grade must not be null");
@@ -19,8 +14,6 @@ public record InspectionResult(
             throw new IllegalArgumentException("note must not exceed 500 characters");
         }
 
-        photoKeys = photoKeys == null
-            ? List.of()
-            : List.copyOf(photoKeys);
+        photoKeys = photoKeys == null ? List.of() : List.copyOf(photoKeys);
     }
 }

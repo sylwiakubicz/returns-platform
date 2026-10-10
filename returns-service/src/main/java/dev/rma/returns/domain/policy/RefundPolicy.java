@@ -4,12 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Objects;
 
-public record RefundPolicy(
-    int gradeAPercent,
-    int gradeBPercent,
-    int gradeCPercent,
-    BigDecimal returnShippingFee
-) {
+public record RefundPolicy(int gradeAPercent, int gradeBPercent, int gradeCPercent, BigDecimal returnShippingFee) {
     public RefundPolicy {
         validatePercent(gradeAPercent, "gradeAPercent");
         validatePercent(gradeBPercent, "gradeBPercent");
