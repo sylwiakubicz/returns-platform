@@ -20,7 +20,9 @@ format:       ## Apply formatting
 
 run:          ## Run returns-service from the reactor
 	./mvnw -B -ntp -pl returns-service -am install -DskipTests
-	./mvnw -B -ntp -pl returns-service spring-boot:run
+	@test -f .env || { echo "missing .env"; exit 1; }; \
+	set -a; source .env; set +a; \
+	./mvnw -B -ntp -pl returns-service spring-boot:run -Dspring-boot.run.profiles=local
 
 image:        ## Build returns-service image into a tarball
 	./mvnw -B -ntp -pl returns-service -am package jib:buildTar -DskipTests
