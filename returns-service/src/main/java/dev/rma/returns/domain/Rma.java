@@ -72,7 +72,7 @@ public final class Rma {
         if (status != RmaStatus.REQUESTED) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.LABEL_ISSUED);
         }
-        LabelIssued labelIssued = new LabelIssued(labelId, trackingNumber, labelFileKey, issuedAt);
+        LabelIssued labelIssued = new LabelIssued(rmaId, labelId, trackingNumber, labelFileKey, issuedAt);
 
         apply(labelIssued);
 
@@ -83,19 +83,19 @@ public final class Rma {
         if (status != RmaStatus.LABEL_ISSUED && status != RmaStatus.PICKUP_SCHEDULED) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.IN_TRANSIT);
         }
-        ParcelInTransit parcelInTransit = new ParcelInTransit(collectedAt);
+        ParcelInTransit parcelInTransit = new ParcelInTransit(rmaId, collectedAt);
 
         apply(parcelInTransit);
 
         return parcelInTransit;
     }
 
-    public PickupScheduled schedulePickup(String pickupId, LocalDate scheduledFor) {
+    public PickupScheduled schedulePickup(String pickupId, LocalDate scheduledFor, Instant occurredAt) {
         if (status != RmaStatus.LABEL_ISSUED) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.PICKUP_SCHEDULED);
         }
 
-        PickupScheduled pickupScheduled = new PickupScheduled(pickupId, scheduledFor);
+        PickupScheduled pickupScheduled = new PickupScheduled(rmaId, pickupId, scheduledFor, occurredAt);
 
         apply(pickupScheduled);
 
@@ -106,7 +106,7 @@ public final class Rma {
         if (status != RmaStatus.IN_TRANSIT) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.RECEIVED);
         }
-        ParcelReceived parcelReceived = new ParcelReceived(receivedAt, werehouseId);
+        ParcelReceived parcelReceived = new ParcelReceived(rmaId, receivedAt, werehouseId);
         apply(parcelReceived);
         return parcelReceived;
     }
@@ -115,7 +115,7 @@ public final class Rma {
         if (status != RmaStatus.RECEIVED) {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.UNDER_INSPECTION);
         }
-        InspectionStarted inspectionStarted = new InspectionStarted(inspectorId, startedAt);
+        InspectionStarted inspectionStarted = new InspectionStarted(rmaId, inspectorId, startedAt);
         apply(inspectionStarted);
         return inspectionStarted;
     }
@@ -136,7 +136,7 @@ public final class Rma {
         validateCompletion(results);
         validateApproval(results, approvedBy, policy);
         InspectionCompleted inspectionCompleted =
-                new InspectionCompleted(inspectorId, completedAt, results, approvedBy);
+                new InspectionCompleted(rmaId, inspectorId, completedAt, results, approvedBy);
 
         List<RmaItem> inspectedItems = items.stream()
                 .map(item -> item.withInspection(results.stream()
@@ -185,6 +185,7 @@ public final class Rma {
         String rejectionReason = determineRejectionReason(inspectedItems, decision, refundAmount);
 
         RefundDecided event = new RefundDecided(
+                rmaId,
                 decision,
                 new Money(refundAmount, this.currency),
                 new Money(deductionTotal, this.currency),
@@ -202,7 +203,7 @@ public final class Rma {
 
         validateExecutedRefundAmount(amount);
 
-        RefundExecuted event = new RefundExecuted(payoutId, amount, attempt, executedAt);
+        RefundExecuted event = new RefundExecuted(rmaId, payoutId, amount, attempt, executedAt);
 
         apply(event);
 
@@ -215,7 +216,7 @@ public final class Rma {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.REFUND_FAILED);
         }
 
-        RefundFailed event = new RefundFailed(failureCode, failureMessage, attempt, retryable, failedAt);
+        RefundFailed event = new RefundFailed(rmaId, failureCode, failureMessage, attempt, retryable, failedAt);
 
         apply(event);
 
@@ -233,7 +234,7 @@ public final class Rma {
                 .toList();
 
         RefundDecided event = new RefundDecided(
-                currentRefundDecision(), refundAmount, deductionTotal, itemDecisions, null, decidedAt);
+                rmaId, currentRefundDecision(), refundAmount, deductionTotal, itemDecisions, null, decidedAt);
 
         apply(event);
 
@@ -245,7 +246,7 @@ public final class Rma {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.EXPIRED);
         }
 
-        RmaExpired event = new RmaExpired(expiredAt, daysSinceRequest);
+        RmaExpired event = new RmaExpired(rmaId, expiredAt, daysSinceRequest);
         apply(event);
         return event;
     }
@@ -255,7 +256,7 @@ public final class Rma {
             throw new InvalidRmaStateTransitionException(status, RmaStatus.LOST);
         }
 
-        RmaLost event = new RmaLost(lastKnownStatus, declaredLostAt);
+        RmaLost event = new RmaLost(rmaId, lastKnownStatus, declaredLostAt);
         apply(event);
         return event;
     }
@@ -266,7 +267,7 @@ public final class Rma {
                     RmaErrorCode.CANCELLATION_NOT_ALLOWED, "Cancellation is not allowed in state " + status);
         }
 
-        RmaCancelled event = new RmaCancelled(cancelledBy, cancelledAt, reason);
+        RmaCancelled event = new RmaCancelled(rmaId, cancelledBy, cancelledAt, reason);
         apply(event);
         return event;
     }
@@ -283,7 +284,7 @@ public final class Rma {
                     default -> throw new InvalidRmaStateTransitionException(status, RmaStatus.CLOSED);
                 };
 
-        RmaClosed event = new RmaClosed(closureReason, closedAt);
+        RmaClosed event = new RmaClosed(rmaId, closureReason, closedAt);
         if (closureReason != expectedReason) {
             throw new IllegalArgumentException("Closure reason must match current RMA state");
         }

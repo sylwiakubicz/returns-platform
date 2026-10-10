@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Currency;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,6 +16,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import dev.rma.returns.domain.Money;
 
 class RefundExecutedTest {
+    private static final UUID RMA_ID = UUID.fromString("018f0000-0000-7000-8000-000000000001");
 
     private static final Currency PLN = Currency.getInstance("PLN");
 
@@ -24,7 +26,7 @@ class RefundExecutedTest {
 
     @Test
     void shouldCreateRefundExecuted() {
-        RefundExecuted event = new RefundExecuted("payout-1", AMOUNT, 1, EXECUTED_AT);
+        RefundExecuted event = new RefundExecuted(RMA_ID, "payout-1", AMOUNT, 1, EXECUTED_AT);
 
         assertAll(
                 () -> assertThat(event.payoutId()).isEqualTo("payout-1"),
@@ -35,33 +37,33 @@ class RefundExecutedTest {
 
     @Test
     void shouldRejectNullPayoutId() {
-        assertThatThrownBy(() -> new RefundExecuted(null, AMOUNT, 1, EXECUTED_AT))
+        assertThatThrownBy(() -> new RefundExecuted(RMA_ID, null, AMOUNT, 1, EXECUTED_AT))
                 .isInstanceOf(NullPointerException.class);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"", " ", "   "})
     void shouldRejectBlankPayoutId(String payoutId) {
-        assertThatThrownBy(() -> new RefundExecuted(payoutId, AMOUNT, 1, EXECUTED_AT))
+        assertThatThrownBy(() -> new RefundExecuted(RMA_ID, payoutId, AMOUNT, 1, EXECUTED_AT))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void shouldRejectNullAmount() {
-        assertThatThrownBy(() -> new RefundExecuted("payout-1", null, 1, EXECUTED_AT))
+        assertThatThrownBy(() -> new RefundExecuted(RMA_ID, "payout-1", null, 1, EXECUTED_AT))
                 .isInstanceOf(NullPointerException.class);
     }
 
     @ParameterizedTest
     @ValueSource(ints = {0, -1})
     void shouldRejectAttemptBelowOne(int attempt) {
-        assertThatThrownBy(() -> new RefundExecuted("payout-1", AMOUNT, attempt, EXECUTED_AT))
+        assertThatThrownBy(() -> new RefundExecuted(RMA_ID, "payout-1", AMOUNT, attempt, EXECUTED_AT))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void shouldRejectNullExecutedAt() {
-        assertThatThrownBy(() -> new RefundExecuted("payout-1", AMOUNT, 1, null))
+        assertThatThrownBy(() -> new RefundExecuted(RMA_ID, "payout-1", AMOUNT, 1, null))
                 .isInstanceOf(NullPointerException.class);
     }
 }

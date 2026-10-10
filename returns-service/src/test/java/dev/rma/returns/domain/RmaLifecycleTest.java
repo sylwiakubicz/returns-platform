@@ -28,6 +28,7 @@ import dev.rma.returns.domain.policy.InspectionPolicy;
 import dev.rma.returns.domain.policy.RefundPolicy;
 
 class RmaLifecycleTest {
+    private static final UUID RMA_ID = UUID.fromString("018f0000-0000-7000-8000-000000000001");
     private static final Currency PLN = Currency.getInstance("PLN");
     private static final Instant AT = Instant.parse("2026-10-01T12:00:00Z");
     private static final RefundPolicy REFUND_POLICY = new RefundPolicy(0, 15, 40, new BigDecimal("15.00"));
@@ -97,7 +98,7 @@ class RmaLifecycleTest {
     private void execute(Rma rma, Command command) {
         switch (command) {
             case ISSUE_LABEL -> rma.issueLabel("label", "tracking", "label.pdf", AT);
-            case SCHEDULE_PICKUP -> rma.schedulePickup("pickup", LocalDate.of(2026, 10, 2));
+            case SCHEDULE_PICKUP -> rma.schedulePickup("pickup", LocalDate.of(2026, 10, 2), AT);
             case IN_TRANSIT -> rma.markParcelInTransit(AT);
             case RECEIVE -> rma.receive(AT, "warehouse");
             case START_INSPECTION -> rma.startInspection("inspector", AT);
@@ -124,6 +125,24 @@ class RmaLifecycleTest {
         assertThat(restored.closureReason()).isEqualTo(ClosureReason.REFUND_COMPLETED);
         assertThat(restored.refundAmount()).isEqualTo(money("85.00"));
         assertThat(restored.payoutId()).isEqualTo("payout");
+    }
+
+    @Test
+    void shouldCarryAggregateIdAndOccurrenceTimeAcrossEveryEventType() {
+        List<DomainEvent> events = new ArrayList<>(positiveHistory());
+        Rma failed = Rma.fromHistory(historyFor(RmaStatus.REFUND_PENDING));
+        events.add(failed.failRefund(FailureCode.TIMEOUT, "timeout", 1, true, AT));
+        events.add(failed.retryRefund(AT));
+        events.add(Rma.fromHistory(historyFor(RmaStatus.REQUESTED)).expire(AT, 14));
+        events.add(Rma.fromHistory(historyFor(RmaStatus.REQUESTED)).cancel("customer", AT, null));
+        events.add(Rma.fromHistory(historyFor(RmaStatus.IN_TRANSIT)).declareLost("IN_TRANSIT", AT));
+
+        assertThat(events.stream().map(Object::getClass).distinct().count())
+                .isEqualTo(DomainEvent.class.getPermittedSubclasses().length);
+        assertThat(events).allSatisfy(event -> {
+            assertThat(event.rmaId()).isEqualTo(RMA_ID);
+            assertThat(event.occurredAt()).isEqualTo(AT);
+        });
     }
 
     @Test
@@ -283,7 +302,7 @@ class RmaLifecycleTest {
         List<DomainEvent> events = new ArrayList<>(historyFor(RmaStatus.REQUESTED));
         Rma rma = Rma.fromHistory(events);
         events.add(rma.issueLabel("label", "tracking", "label.pdf", AT));
-        events.add(rma.schedulePickup("pickup", LocalDate.of(2026, 10, 2)));
+        events.add(rma.schedulePickup("pickup", LocalDate.of(2026, 10, 2), AT));
         events.add(rma.markParcelInTransit(AT));
         events.add(rma.receive(AT, "warehouse"));
         events.add(rma.startInspection("inspector", AT));
@@ -308,27 +327,27 @@ class RmaLifecycleTest {
         history.add(requested(RmaReason.CHANGED_MIND, List.of(item("item", "100.00"))));
         if (status == RmaStatus.REQUESTED) return history;
         if (status == RmaStatus.EXPIRED) {
-            history.add(new RmaExpired(AT, 14));
+            history.add(new RmaExpired(RMA_ID, AT, 14));
             return history;
         }
         if (status == RmaStatus.CANCELLED || status == RmaStatus.CLOSED) {
-            history.add(new RmaCancelled("customer", AT, null));
-            if (status == RmaStatus.CLOSED) history.add(new RmaClosed(ClosureReason.CANCELLED_BY_CUSTOMER, AT));
+            history.add(new RmaCancelled(RMA_ID, "customer", AT, null));
+            if (status == RmaStatus.CLOSED) history.add(new RmaClosed(RMA_ID, ClosureReason.CANCELLED_BY_CUSTOMER, AT));
             return history;
         }
-        history.add(new LabelIssued("label", "tracking", "label.pdf", AT));
+        history.add(new LabelIssued(RMA_ID, "label", "tracking", "label.pdf", AT));
         if (status == RmaStatus.LABEL_ISSUED) return history;
-        history.add(new PickupScheduled("pickup", LocalDate.of(2026, 10, 2)));
+        history.add(new PickupScheduled(RMA_ID, "pickup", LocalDate.of(2026, 10, 2), AT));
         if (status == RmaStatus.PICKUP_SCHEDULED) return history;
-        history.add(new ParcelInTransit(AT));
+        history.add(new ParcelInTransit(RMA_ID, AT));
         if (status == RmaStatus.IN_TRANSIT) return history;
         if (status == RmaStatus.LOST) {
-            history.add(new RmaLost("IN_TRANSIT", AT));
+            history.add(new RmaLost(RMA_ID, "IN_TRANSIT", AT));
             return history;
         }
-        history.add(new ParcelReceived(AT, "warehouse"));
+        history.add(new ParcelReceived(RMA_ID, AT, "warehouse"));
         if (status == RmaStatus.RECEIVED) return history;
-        history.add(new InspectionStarted("inspector", AT));
+        history.add(new InspectionStarted(RMA_ID, "inspector", AT));
         if (status == RmaStatus.UNDER_INSPECTION) return history;
         Rma rma = Rma.fromHistory(history);
         history.addAll(rma.completeInspection(

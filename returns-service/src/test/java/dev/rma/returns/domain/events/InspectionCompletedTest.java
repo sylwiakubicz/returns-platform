@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,7 @@ import dev.rma.returns.domain.InspectionResult;
 import dev.rma.returns.domain.enums.ItemGrade;
 
 public class InspectionCompletedTest {
+    private static final UUID RMA_ID = UUID.fromString("018f0000-0000-7000-8000-000000000001");
     private static final Instant COMPLETED_AT = Instant.parse("2026-09-18T13:00:00Z");
     private static final String INSPECTOR_ID = "inspector-1";
 
@@ -21,21 +23,21 @@ public class InspectionCompletedTest {
     @Test
     void shouldRejectNullInspectorId() {
         List<InspectionResult> results = new ArrayList<>();
-        assertThatThrownBy(() -> new InspectionCompleted(null, COMPLETED_AT, results, null))
+        assertThatThrownBy(() -> new InspectionCompleted(RMA_ID, null, COMPLETED_AT, results, null))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessage("inspectorId must not be null");
     }
 
     @Test
     void shouldRejectNullCompletedAt() {
-        assertThatThrownBy(() -> new InspectionCompleted(INSPECTOR_ID, null, List.of(RESULT), null))
+        assertThatThrownBy(() -> new InspectionCompleted(RMA_ID, INSPECTOR_ID, null, List.of(RESULT), null))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessage("completedAt must not be null");
     }
 
     @Test
     void shouldRejectNullResults() {
-        assertThatThrownBy(() -> new InspectionCompleted(INSPECTOR_ID, COMPLETED_AT, null, null))
+        assertThatThrownBy(() -> new InspectionCompleted(RMA_ID, INSPECTOR_ID, COMPLETED_AT, null, null))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessage("results must not be null");
     }

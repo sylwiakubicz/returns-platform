@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertAll;
 
 import java.time.Instant;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -13,12 +14,14 @@ import org.junit.jupiter.params.provider.ValueSource;
 import dev.rma.returns.domain.enums.FailureCode;
 
 class RefundFailedTest {
+    private static final UUID RMA_ID = UUID.fromString("018f0000-0000-7000-8000-000000000001");
 
     private static final Instant FAILED_AT = Instant.parse("2026-09-20T15:00:00Z");
 
     @Test
     void shouldCreateRefundFailed() {
-        RefundFailed event = new RefundFailed(FailureCode.TIMEOUT, "Payment provider timeout", 1, true, FAILED_AT);
+        RefundFailed event =
+                new RefundFailed(RMA_ID, FailureCode.TIMEOUT, "Payment provider timeout", 1, true, FAILED_AT);
 
         assertAll(
                 () -> assertThat(event.failureCode()).isEqualTo(FailureCode.TIMEOUT),
@@ -30,21 +33,22 @@ class RefundFailedTest {
 
     @Test
     void shouldRejectNullFailureCode() {
-        assertThatThrownBy(() -> new RefundFailed(null, "Payment provider timeout", 1, true, FAILED_AT))
+        assertThatThrownBy(() -> new RefundFailed(RMA_ID, null, "Payment provider timeout", 1, true, FAILED_AT))
                 .isInstanceOf(NullPointerException.class);
     }
 
     @ParameterizedTest
     @ValueSource(ints = {0, -1})
     void shouldRejectAttemptBelowOne(int attempt) {
-        assertThatThrownBy(() ->
-                        new RefundFailed(FailureCode.TIMEOUT, "Payment provider timeout", attempt, true, FAILED_AT))
+        assertThatThrownBy(() -> new RefundFailed(
+                        RMA_ID, FailureCode.TIMEOUT, "Payment provider timeout", attempt, true, FAILED_AT))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void shouldRejectNullFailedAt() {
-        assertThatThrownBy(() -> new RefundFailed(FailureCode.TIMEOUT, "Payment provider timeout", 1, true, null))
+        assertThatThrownBy(
+                        () -> new RefundFailed(RMA_ID, FailureCode.TIMEOUT, "Payment provider timeout", 1, true, null))
                 .isInstanceOf(NullPointerException.class);
     }
 }

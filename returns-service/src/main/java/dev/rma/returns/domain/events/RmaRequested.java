@@ -38,4 +38,9 @@ public record RmaRequested(
 
         items = List.copyOf(items);
     }
+
+    @Override
+    public Instant occurredAt() {
+        return requestedAt;
+    }
 }

@@ -267,7 +267,7 @@ public class RmaTest {
         void shouldSchedulePickupForRmaWithIssuedLabel() {
             Rma rma = Rma.fromHistory(List.of(validRmaRequested(), validLabelIssued()));
 
-            PickupScheduled event = rma.schedulePickup(PICKUP_ID, SCHEDULED_FOR);
+            PickupScheduled event = rma.schedulePickup(PICKUP_ID, SCHEDULED_FOR, ISSUED_AT);
 
             assertAll(() -> assertThat(event.pickupId()).isEqualTo(PICKUP_ID), () -> assertThat(event.scheduledFor())
                     .isEqualTo(SCHEDULED_FOR));
@@ -288,7 +288,7 @@ public class RmaTest {
         void shouldRejectPickupSchedulingWhenRmaIsNotLabelIssued() {
             Rma rma = Rma.fromHistory(List.of(validRmaRequested()));
 
-            assertThatThrownBy(() -> rma.schedulePickup(PICKUP_ID, SCHEDULED_FOR))
+            assertThatThrownBy(() -> rma.schedulePickup(PICKUP_ID, SCHEDULED_FOR, ISSUED_AT))
                     .isInstanceOf(InvalidRmaStateTransitionException.class)
                     .hasMessage("Invalid RMA state transition from REQUESTED to PICKUP_SCHEDULED");
         }
@@ -1453,7 +1453,7 @@ public class RmaTest {
                 RmaExpired event = rma.expire(expiredAt, 14);
 
                 assertAll(
-                        () -> assertThat(event).isEqualTo(new RmaExpired(expiredAt, 14)),
+                        () -> assertThat(event).isEqualTo(new RmaExpired(RMA_ID, expiredAt, 14)),
                         () -> assertThat(rma.status()).isEqualTo(RmaStatus.EXPIRED),
                         () -> assertThat(rma.items()).isEqualTo(items),
                         () -> assertThat(rma.businessNumber()).isEqualTo(BUSINESS_NUMBER),
@@ -1466,7 +1466,10 @@ public class RmaTest {
         @Test
         void shouldRebuildExpiredStateFromHistory() {
             Rma rma = Rma.fromHistory(List.of(
-                    validRmaRequested(), validLabelIssued(), validPickupScheduled(), new RmaExpired(expiredAt, 14)));
+                    validRmaRequested(),
+                    validLabelIssued(),
+                    validPickupScheduled(),
+                    new RmaExpired(RMA_ID, expiredAt, 14)));
 
             assertAll(
                     () -> assertThat(rma.status()).isEqualTo(RmaStatus.EXPIRED),
@@ -1546,7 +1549,7 @@ public class RmaTest {
             RmaLost event = rma.declareLost(lastKnownStatus, declaredLostAt);
 
             assertAll(
-                    () -> assertThat(event).isEqualTo(new RmaLost(lastKnownStatus, declaredLostAt)),
+                    () -> assertThat(event).isEqualTo(new RmaLost(RMA_ID, lastKnownStatus, declaredLostAt)),
                     () -> assertThat(rma.status()).isEqualTo(RmaStatus.LOST),
                     () -> assertThat(rma.version()).isEqualTo(5),
                     () -> assertThat(rma.items()).isEqualTo(items),
@@ -1625,7 +1628,7 @@ public class RmaTest {
                     validLabelIssued(),
                     validPickupScheduled(),
                     validParcelInTransit(),
-                    new RmaLost(lastKnownStatus, declaredLostAt)));
+                    new RmaLost(RMA_ID, lastKnownStatus, declaredLostAt)));
         }
 
         private void assertDeclarationRejected(Rma rma) {
@@ -1661,7 +1664,7 @@ public class RmaTest {
 
                 assertAll(
                         () -> assertThat(event)
-                                .isEqualTo(new RmaCancelled(CUSTOMER_ID, cancelledAt, "Wycofuję zgłoszenie")),
+                                .isEqualTo(new RmaCancelled(RMA_ID, CUSTOMER_ID, cancelledAt, "Wycofuję zgłoszenie")),
                         () -> assertThat(rma.status()).isEqualTo(RmaStatus.CANCELLED),
                         () -> assertThat(rma.items()).isEqualTo(items),
                         () -> assertThat(rma.reason()).isEqualTo(originalReason),
@@ -1688,7 +1691,7 @@ public class RmaTest {
                     validRmaRequested(),
                     validLabelIssued(),
                     validPickupScheduled(),
-                    new RmaCancelled(CUSTOMER_ID, cancelledAt, null)));
+                    new RmaCancelled(RMA_ID, CUSTOMER_ID, cancelledAt, null)));
 
             assertAll(
                     () -> assertThat(rma.status()).isEqualTo(RmaStatus.CANCELLED),
@@ -1774,7 +1777,7 @@ public class RmaTest {
                 RmaClosed event = rma.close(reason, closedAt);
 
                 assertAll(
-                        () -> assertThat(event).isEqualTo(new RmaClosed(reason, closedAt)),
+                        () -> assertThat(event).isEqualTo(new RmaClosed(RMA_ID, reason, closedAt)),
                         () -> assertThat(rma.status()).isEqualTo(RmaStatus.CLOSED),
                         () -> assertThat(rma.version()).isEqualTo(version + 1),
                         () -> assertThat(rma.closedAt()).isEqualTo(closedAt),
@@ -1840,8 +1843,8 @@ public class RmaTest {
         void shouldRebuildClosedStateFromHistory() {
             Rma rma = Rma.fromHistory(List.of(
                     validRmaRequested(),
-                    new RmaCancelled(CUSTOMER_ID, REQUESTED_AT, null),
-                    new RmaClosed(ClosureReason.CANCELLED_BY_CUSTOMER, closedAt)));
+                    new RmaCancelled(RMA_ID, CUSTOMER_ID, REQUESTED_AT, null),
+                    new RmaClosed(RMA_ID, ClosureReason.CANCELLED_BY_CUSTOMER, closedAt)));
 
             assertAll(
                     () -> assertThat(rma.status()).isEqualTo(RmaStatus.CLOSED),
@@ -1858,7 +1861,7 @@ public class RmaTest {
 
             List<Runnable> commands = List.of(
                     () -> rma.issueLabel(LABEL_ID, TRACKING_NUMBER, LABEL_FILE_KEY, ISSUED_AT),
-                    () -> rma.schedulePickup(PICKUP_ID, SCHEDULED_FOR),
+                    () -> rma.schedulePickup(PICKUP_ID, SCHEDULED_FOR, ISSUED_AT),
                     () -> rma.markParcelInTransit(COLLECTED_AT),
                     () -> rma.receive(RECEIVED_AT, WAREHOUSE_ID),
                     () -> rma.startInspection(INSPECTOR_ID, STARTED_AT),
@@ -2011,27 +2014,27 @@ public class RmaTest {
     }
 
     private PickupScheduled validPickupScheduled() {
-        return new PickupScheduled(PICKUP_ID, SCHEDULED_FOR);
+        return new PickupScheduled(RMA_ID, PICKUP_ID, SCHEDULED_FOR, ISSUED_AT);
     }
 
     private LabelIssued validLabelIssued() {
-        return new LabelIssued(LABEL_ID, TRACKING_NUMBER, LABEL_FILE_KEY, ISSUED_AT);
+        return new LabelIssued(RMA_ID, LABEL_ID, TRACKING_NUMBER, LABEL_FILE_KEY, ISSUED_AT);
     }
 
     private ParcelInTransit validParcelInTransit() {
-        return new ParcelInTransit(COLLECTED_AT);
+        return new ParcelInTransit(RMA_ID, COLLECTED_AT);
     }
 
     private ParcelReceived validParcelReceived() {
-        return new ParcelReceived(RECEIVED_AT, WAREHOUSE_ID);
+        return new ParcelReceived(RMA_ID, RECEIVED_AT, WAREHOUSE_ID);
     }
 
     private InspectionStarted validInspectionStarted() {
-        return new InspectionStarted(INSPECTOR_ID, STARTED_AT);
+        return new InspectionStarted(RMA_ID, INSPECTOR_ID, STARTED_AT);
     }
 
     private InspectionCompleted validInspectionCompleted(List<InspectionResult> results) {
-        return new InspectionCompleted(INSPECTOR_ID, COMPLETED_AT, results, null);
+        return new InspectionCompleted(RMA_ID, INSPECTOR_ID, COMPLETED_AT, results, null);
     }
 
     private InspectionCompleted validInspectionCompleted() {
@@ -2040,6 +2043,7 @@ public class RmaTest {
 
     private RefundDecided validFullRefundDecided() {
         return new RefundDecided(
+                RMA_ID,
                 RefundDecision.FULL,
                 new Money(new BigDecimal("15.00"), PLN),
                 new Money(new BigDecimal("15.00"), PLN),
@@ -2050,6 +2054,7 @@ public class RmaTest {
 
     private RefundDecided validRejectedRefundDecided() {
         return new RefundDecided(
+                RMA_ID,
                 RefundDecision.REJECTED,
                 new Money(new BigDecimal("0.00"), PLN),
                 new Money(new BigDecimal("0.00"), PLN),
@@ -2061,17 +2066,19 @@ public class RmaTest {
     }
 
     private RefundExecuted validRefundExecuted() {
-        return new RefundExecuted(PAYOUT_ID, new Money(new BigDecimal("15.00"), PLN), PAYOUT_ATTEMPT, EXECUTED_AT);
+        return new RefundExecuted(
+                RMA_ID, PAYOUT_ID, new Money(new BigDecimal("15.00"), PLN), PAYOUT_ATTEMPT, EXECUTED_AT);
     }
 
     private RefundFailed validRefundFailed() {
-        return new RefundFailed(FailureCode.INSUFFICIENT_FUNDS, "Insufficient funds", 1, false, FAILED_AT);
+        return new RefundFailed(RMA_ID, FailureCode.INSUFFICIENT_FUNDS, "Insufficient funds", 1, false, FAILED_AT);
     }
 
     private RefundDecided validRetryRefundDecided() {
         RefundDecided original = validFullRefundDecided();
 
         return new RefundDecided(
+                RMA_ID,
                 original.decision(),
                 original.refundAmount(),
                 original.deductionTotal(),

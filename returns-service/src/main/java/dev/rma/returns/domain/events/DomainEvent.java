@@ -1,5 +1,8 @@
 package dev.rma.returns.domain.events;
 
+import java.time.Instant;
+import java.util.UUID;
+
 public sealed interface DomainEvent
         permits RmaRequested,
                 LabelIssued,
@@ -14,4 +17,8 @@ public sealed interface DomainEvent
                 RmaExpired,
                 RmaLost,
                 RmaCancelled,
-                RmaClosed {}
+                RmaClosed {
+    UUID rmaId();
+
+    Instant occurredAt();
+}

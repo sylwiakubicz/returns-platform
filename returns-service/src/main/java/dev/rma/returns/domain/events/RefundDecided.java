@@ -3,12 +3,14 @@ package dev.rma.returns.domain.events;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 import dev.rma.returns.domain.ItemRefundDecision;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.enums.RefundDecision;
 
 public record RefundDecided(
+        UUID rmaId,
         RefundDecision decision,
         Money refundAmount,
         Money deductionTotal,
@@ -17,6 +19,7 @@ public record RefundDecided(
         Instant decidedAt)
         implements DomainEvent {
     public RefundDecided {
+        Objects.requireNonNull(rmaId, "rmaId must not be null");
         Objects.requireNonNull(decision, "decision must not be null");
         Objects.requireNonNull(refundAmount, "refundAmount must not be null");
         Objects.requireNonNull(deductionTotal, "deductionTotal must not be null");
@@ -32,5 +35,10 @@ public record RefundDecided(
         }
 
         itemDecisions = List.copyOf(itemDecisions);
+    }
+
+    @Override
+    public Instant occurredAt() {
+        return decidedAt;
     }
 }
