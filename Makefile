@@ -1,4 +1,4 @@
-.PHONY: help build test lint format run image verify-image namespace secrets infra-up infra-down infra-purge infra-status check-arch smoke
+.PHONY: help build test lint format run image verify-image namespace secrets infra-up infra-down infra-purge infra-status check-arch smoke migrate role-check
 SHELL := /bin/bash
 .SHELLFLAGS := -eu -o pipefail -c
 
@@ -76,3 +76,37 @@ check-arch:    ## Verify that every image has an arm64 build
 
 smoke:         ## Full infrastructure smoke test
 	./scripts/smoke-infra.sh $(VM_HOST)
+
+migrate: secrets ## Run returns-service database migrations on the VM via Flyway
+	kubectl -n app delete job returns-flyway --ignore-not-found --wait=true
+	kubectl -n app create configmap returns-migrations \
+		--from-file=returns-service/src/main/resources/db/migration/ \
+		--dry-run=client -o yaml | kubectl -n app apply -f -
+	@kubectl -n infra get secret infra-credentials -o json \
+		| jq -e '{apiVersion: "v1", kind: "Secret", \
+		    metadata: {name: "returns-migrator", namespace: "app"}, type: "Opaque", \
+		    data: {password: (.data.MIGRATOR_PASSWORD \
+		      | if type == "string" and length > 0 then . else error("missing MIGRATOR_PASSWORD") end)}}' \
+		| kubectl -n app apply -f -
+	kubectl apply -f k8s/app/00-flyway-job.yaml
+	@if kubectl -n app wait --for=condition=complete job/returns-flyway --timeout=610s; then \
+		kubectl -n app logs job/returns-flyway; \
+	else \
+		kubectl -n app logs job/returns-flyway || true; \
+		kubectl -n app describe job returns-flyway; \
+		exit 1; \
+	fi
+
+
+role-check: ## Show returns_app privileges (expected: t, t, f, f, f)
+	@test -f .env || { echo "missing .env"; exit 1; }; \
+	set -a; source .env; set +a; \
+	PGPASSWORD="$${RETURNS_APP_PASSWORD:?missing RETURNS_APP_PASSWORD}" psql \
+		-v ON_ERROR_STOP=1 -h "$(VM_HOST)" -p 30432 -U returns_app \
+		-d returns_platform \
+		-c "SELECT \
+		  has_table_privilege(current_user, 'returns.rma_events', 'SELECT') AS can_read, \
+		  has_table_privilege(current_user, 'returns.rma_events', 'INSERT') AS can_append, \
+		  has_table_privilege(current_user, 'returns.rma_events', 'UPDATE') AS can_update, \
+		  has_table_privilege(current_user, 'returns.rma_events', 'DELETE') AS can_delete, \
+		  has_schema_privilege(current_user, 'returns', 'CREATE') AS can_create;"

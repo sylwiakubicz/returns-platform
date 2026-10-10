@@ -12,6 +12,7 @@ IMAGES=(
   "tchiotludo/akhq:0.25.1"
   "quay.io/keycloak/keycloak:26.0"
   "wiremock/wiremock:3.9.1"
+  "flyway/flyway:13.7.0"
 )
 
 failed=0

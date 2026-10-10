@@ -1,4 +1,5 @@
-CREATE TABLE IF NOT EXISTS rma_events(
+-- The returns schema is provisioned by the infrastructure and owned by migrator.
+CREATE TABLE returns.rma_events (
     event_id UUID PRIMARY KEY,
     rma_id UUID NOT NULL,
     version INTEGER NOT NULL,
@@ -11,12 +12,11 @@ CREATE TABLE IF NOT EXISTS rma_events(
     UNIQUE (rma_id, version)
 );
 
-CREATE TABLE IF NOT EXISTS processed_messages(
-    message_key TEXT PRIMARY KEY,
-    processed_at TIMESTAMPTZ NOT NULL
-);
+-- Application access to the event history is append-only.
+REVOKE UPDATE, DELETE ON returns.rma_events FROM returns_app;
+GRANT SELECT, INSERT ON returns.rma_events TO returns_app;
 
-CREATE TABLE IF NOT EXISTS rma_snapshots(
+CREATE TABLE returns.rma_snapshots (
     rma_id UUID NOT NULL,
     version INTEGER NOT NULL,
     state JSONB NOT NULL,
@@ -26,10 +26,10 @@ CREATE TABLE IF NOT EXISTS rma_snapshots(
 
     CONSTRAINT fk_snapshots_events
     FOREIGN KEY (rma_id, version)
-    REFERENCES rma_events(rma_id, version)
+    REFERENCES returns.rma_events(rma_id, version)
 );
 
-CREATE TABLE IF NOT EXISTS rma_projection(
+CREATE TABLE returns.rma_projection (
     rma_id UUID PRIMARY KEY,
     business_number TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL,
@@ -37,24 +37,15 @@ CREATE TABLE IF NOT EXISTS rma_projection(
     updated_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS outbox(
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    aggregate_id UUID NOT NULL,
-    topic TEXT NOT NULL,
-    partition_key TEXT NOT NULL,
-    payload BYTEA NOT NULL,
-    published_at TIMESTAMPTZ
+-- One counter per year; the persistence adapter increments it atomically
+-- using INSERT ... ON CONFLICT DO UPDATE ... RETURNING last_value.
+-- Reject overflow instead of producing a number wider than RMA-YYYY-NNNNNN.
+CREATE TABLE returns.rma_business_number_counters (
+    year INTEGER PRIMARY KEY CHECK (year BETWEEN 1 AND 9999),
+    last_value INTEGER NOT NULL CHECK (last_value BETWEEN 1 AND 999999)
 );
 
-CREATE TABLE IF NOT EXISTS sla_timers(
-    id BIGINT PRIMARY KEY,
-    rma_id UUID NOT NULL,
-    timer_type TEXT NOT NULL,
-    fire_at TIMESTAMPTZ NOT NULL,
-    status TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS idempotency_keys (
+CREATE TABLE returns.idempotency_keys (
     idempotency_key TEXT NOT NULL,
     endpoint TEXT NOT NULL,
     request_hash TEXT NOT NULL,
@@ -66,4 +57,4 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
 );
 
 CREATE INDEX idx_idempotency_keys_created_at
-    ON idempotency_keys (created_at);
+    ON returns.idempotency_keys (created_at);

@@ -1,0 +1,55 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: returns-flyway
+  namespace: app
+  labels: { app: returns-flyway, tier: job }
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app: returns-flyway, tier: job }
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      containers:
+        - name: flyway
+          image: flyway/flyway:13.7.0
+          args: ["migrate"]
+          env:
+            - name: FLYWAY_URL
+              value: jdbc:postgresql://postgres.infra.svc.cluster.local:5432/returns_platform
+            - name: FLYWAY_USER
+              value: migrator
+            - name: FLYWAY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: returns-migrator
+                  key: password
+            - name: FLYWAY_SCHEMAS
+              value: returns
+            - name: FLYWAY_DEFAULT_SCHEMA
+              value: returns
+            - name: FLYWAY_CREATE_SCHEMAS
+              value: "false"
+            - name: FLYWAY_LOCATIONS
+              value: filesystem:/flyway/sql
+            - name: FLYWAY_CONNECT_RETRIES
+              value: "30"
+            - name: FLYWAY_CLEAN_DISABLED
+              value: "true"
+            - name: FLYWAY_VALIDATE_MIGRATION_NAMING
+              value: "true"
+          resources:
+            requests: { memory: 256Mi, cpu: 100m }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - name: migrations
+              mountPath: /flyway/sql
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: returns-migrations
