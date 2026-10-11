@@ -1,0 +1,17 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="PostgresEventStoreIT (Colima)" type="JUnit" factoryName="JUnit">
+    <module name="returns-service" />
+    <option name="PACKAGE_NAME" value="dev.rma.returns.adapter.out.persistence" />
+    <option name="MAIN_CLASS_NAME" value="dev.rma.returns.adapter.out.persistence.PostgresEventStoreIT" />
+    <option name="TEST_OBJECT" value="class" />
+    <option name="VM_PARAMETERS" value="-Dapi.version=1.44" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <envs>
+      <env name="DOCKER_HOST" value="unix://$USER_HOME$/.colima/default/docker.sock" />
+      <env name="TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE" value="/var/run/docker.sock" />
+    </envs>
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
