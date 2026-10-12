@@ -1,6 +1,7 @@
 package dev.rma.returns.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -8,11 +9,16 @@ import java.time.LocalDate;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import javax.sql.DataSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.RepeatedTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,6 +36,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import dev.rma.returns.application.port.out.EventStore;
+import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.RequestedItem;
 import dev.rma.returns.domain.Rma;
@@ -52,20 +59,22 @@ class PostgresEventStoreIT {
 
     @Test
     void shouldPersistThreeEventsAndRestoreRma() {
-        UUID rmaId = UUID.fromString("018f0000-0000-7000-8000-000000000001");
-        Instant requestedAt = Instant.parse("2026-10-01T12:00:00Z");
-        Currency currency = Currency.getInstance("PLN");
-        RmaRequested requested = Rma.request(
-                rmaId, "RMA-2026-000001", "order", "customer", requestedAt.minusSeconds(86400),
-                RmaReason.CHANGED_MIND, null,
-                List.of(new RequestedItem("item", "sku", "Hobbit", 1,
-                        new Money(new BigDecimal("100.00"), currency))),
-                currency, requestedAt, 14);
+        UUID rmaId = UUID.randomUUID();
+        RmaRequested requested = requested(rmaId);
+        Instant requestedAt = requested.requestedAt();
+
         Rma original = Rma.fromHistory(List.of(requested));
         List<DomainEvent> events = List.of(
-                requested,
-                original.issueLabel("label", "tracking", "label.pdf", requestedAt.plusSeconds(60)),
-                original.schedulePickup("pickup", LocalDate.of(2026, 10, 3), requestedAt.plusSeconds(120)));
+            requested,
+            original.issueLabel(
+                "label", "tracking", "label.pdf",
+                requestedAt.plusSeconds(60)),
+            original.schedulePickup(
+                "pickup", LocalDate.of(2026, 10, 3),
+                requestedAt.plusSeconds(120)));
+//        events   = [RmaRequested, LabelIssued, PickupScheduled]
+//        original = status PICKUP_SCHEDULED, version 3
+
 
         eventStore.append(rmaId, 0, events);
 
@@ -81,6 +90,87 @@ class PostgresEventStoreIT {
     @Test
     void shouldReturnEmptyForUnknownRma() {
         assertThat(eventStore.load(UUID.randomUUID())).isEmpty();
+    }
+
+    @Test
+    void shouldRejectStaleVersionWithoutChangingHistory() {
+        UUID rmaId = UUID.randomUUID();
+        RmaRequested requested = requested(rmaId);
+        eventStore.append(rmaId, 0, List.of(requested));
+
+        assertThatThrownBy(() -> eventStore.append(rmaId, 0, List.of(requested)))
+                .isInstanceOf(ConcurrencyConflictException.class)
+                .hasCauseInstanceOf(DataIntegrityViolationException.class);
+        assertThat(eventStore.load(rmaId).orElseThrow().version()).isEqualTo(1);
+    }
+
+    @RepeatedTest(20)
+    void shouldAllowExactlyOneConcurrentWriter() throws Exception {
+        UUID rmaId = UUID.randomUUID();
+        RmaRequested requested = requested(rmaId);
+        eventStore.append(rmaId, 0, List.of(requested));
+        DomainEvent label = Rma.fromHistory(List.of(requested))
+                .issueLabel("label", "tracking", "label.pdf", requested.requestedAt());
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            java.util.concurrent.Callable<Boolean> writer = () -> {
+                ready.countDown();
+                if (!start.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Timed out waiting for concurrent writers");
+                }
+                try {
+                    eventStore.append(rmaId, 1, List.of(label));
+                    return true;
+                } catch (ConcurrencyConflictException exception) {
+                    return false;
+                }
+            };
+            var first = executor.submit(writer);
+            var second = executor.submit(writer);
+            try {
+                assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            } finally {
+                start.countDown();
+            }
+            assertThat(List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS)))
+                    .containsExactlyInAnyOrder(true, false);
+        }
+        assertThat(eventStore.load(rmaId).orElseThrow().version()).isEqualTo(2);
+    }
+
+    @Test
+    void shouldRollbackWholeAppendAndPreserveOtherIntegrityErrors() {
+        UUID rmaId = UUID.randomUUID();
+        RmaRequested requested = requested(rmaId);
+        eventStore.append(rmaId, 0, List.of(requested));
+        Rma rma = Rma.fromHistory(List.of(requested));
+        List<DomainEvent> events = List.of(
+                rma.issueLabel("label", "tracking", "label.pdf", requested.requestedAt()),
+                rma.schedulePickup("pickup", LocalDate.of(2026, 10, 3), requested.requestedAt()));
+        // Wyłącznie testowe ograniczenie: wymuszamy błąd drugiego INSERT-a.
+        jdbcTemplate.execute("ALTER TABLE returns.rma_events ADD CONSTRAINT test_reject_pickup CHECK ("
+                + "rma_id <> '" + rmaId + "'::uuid OR type <> 'PickupScheduled')");
+        try {
+            assertThatThrownBy(() -> eventStore.append(rmaId, 1, events))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(jdbcTemplate.queryForList(
+                    "SELECT version FROM returns.rma_events WHERE rma_id = ? ORDER BY version",
+                    Integer.class, rmaId)).containsExactly(1);
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE returns.rma_events DROP CONSTRAINT test_reject_pickup");
+        }
+    }
+
+    private static RmaRequested requested(UUID rmaId) {
+        Instant at = Instant.parse("2026-10-01T12:00:00Z");
+        Currency currency = Currency.getInstance("PLN");
+        return Rma.request(rmaId, "RMA-2026-000001", "order", "customer", at.minusSeconds(86400),
+                RmaReason.CHANGED_MIND, null,
+                List.of(new RequestedItem("item", "sku", "Hobbit", 1,
+                        new Money(new BigDecimal("100.00"), currency))),
+                currency, at, 14);
     }
 
     @Configuration
