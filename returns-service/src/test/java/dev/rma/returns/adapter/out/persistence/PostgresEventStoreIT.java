@@ -31,11 +31,15 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import dev.rma.returns.application.port.out.EventStore;
+import dev.rma.returns.application.port.out.StoredEvent;
 import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.RequestedItem;
@@ -56,6 +60,12 @@ class PostgresEventStoreIT {
 
     @Autowired
     JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
+    @Autowired
+    EventJsonMapper mapper;
 
     @Test
     void shouldPersistThreeEventsAndRestoreRma() {
@@ -90,6 +100,58 @@ class PostgresEventStoreIT {
     @Test
     void shouldReturnEmptyForUnknownRma() {
         assertThat(eventStore.load(UUID.randomUUID())).isEmpty();
+    }
+
+    @Test
+    void shouldReadFromVersionInclusivelyWithStoredMetadata() {
+        UUID rmaId = UUID.randomUUID();
+        RmaRequested requested = requested(rmaId);
+        Rma rma = Rma.fromHistory(List.of(requested));
+        List<DomainEvent> events = List.of(requested,
+                rma.issueLabel("label", "tracking", "label.pdf", requested.requestedAt()),
+                rma.schedulePickup("pickup", LocalDate.of(2026, 10, 3), requested.requestedAt()));
+        eventStore.append(rmaId, 0, events);
+        UUID otherId = UUID.randomUUID();
+        eventStore.append(otherId, 0, List.of(requested(otherId)));
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            try (var stream = eventStore.readFrom(rmaId, 2)) {
+                List<StoredEvent> stored = stream.toList();
+                assertThat(stored).extracting(StoredEvent::version).containsExactly(2L, 3L);
+                assertThat(stored).extracting(StoredEvent::eventId).doesNotHaveDuplicates().doesNotContainNull();
+                assertThat(stored).allSatisfy(event -> {
+                    assertThat(event.rmaId()).isEqualTo(rmaId);
+                    assertThat(event.schemaVersion()).isEqualTo(1);
+                    assertThat(event.occurredAt()).isEqualTo(requested.requestedAt());
+                });
+                assertThat(stored.stream().map(event -> mapper.fromJson(
+                        event.type(), event.schemaVersion(), event.payload())).toList())
+                        .containsExactlyElementsOf(events.subList(1, 3));
+            }
+        });
+    }
+
+    @Test
+    void shouldReturnEmptyStreamsAndAllowClosingBeforeExhaustion() {
+        UUID rmaId = UUID.randomUUID();
+        eventStore.append(rmaId, 0, List.of(requested(rmaId)));
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            try (var stream = eventStore.readFrom(rmaId, 1)) {
+                assertThat(stream.findFirst()).isPresent();
+            }
+            try (var stream = eventStore.readFrom(rmaId, 2)) {
+                assertThat(stream.toList()).isEmpty();
+            }
+            try (var stream = eventStore.readFrom(UUID.randomUUID(), 1)) {
+                assertThat(stream.toList()).isEmpty();
+            }
+        });
+    }
+
+    @Test
+    void shouldRequireCallerTransactionForStreaming() {
+        assertThatThrownBy(() -> eventStore.readFrom(UUID.randomUUID(), 1))
+                .isInstanceOf(IllegalTransactionStateException.class);
     }
 
     @Test

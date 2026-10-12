@@ -5,7 +5,8 @@ import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.application.port.out.StoredEvent;
 import dev.rma.returns.domain.Rma;
 import dev.rma.returns.domain.events.DomainEvent;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.postgresql.util.PSQLException;
@@ -115,7 +116,36 @@ public class PostgresEventStore implements EventStore {
     }
 
     @Override
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
     public Stream<StoredEvent> readFrom(UUID rmaId, long fromVersion) {
-        return Stream.empty();
+        Objects.requireNonNull(rmaId, "RmaId must not be null");
+        if (fromVersion < 1) {
+            throw new IllegalArgumentException("From version must be at least 1");
+        }
+
+        String sql = """
+                SELECT event_id, rma_id, version, type, schema_version, payload, occurred_at
+                FROM returns.rma_events
+                WHERE rma_id = ? AND version >= ?
+                ORDER BY version ASC
+                """;
+
+        return jdbcTemplate.queryForStream(
+                connection -> {
+                    var statement = connection.prepareStatement(sql);
+                    statement.setObject(1, rmaId);
+                    statement.setLong(2, fromVersion);
+                    // PostgreSQL pobiera wiersze partiami wewnątrz transakcji.
+                    statement.setFetchSize(100);
+                    return statement;
+                },
+                (resultSet, rowNum) -> new StoredEvent(
+                        resultSet.getObject("event_id", UUID.class),
+                        resultSet.getObject("rma_id", UUID.class),
+                        resultSet.getLong("version"),
+                        resultSet.getString("type"),
+                        resultSet.getInt("schema_version"),
+                        resultSet.getString("payload"),
+                        resultSet.getTimestamp("occurred_at").toInstant()));
     }
 }
