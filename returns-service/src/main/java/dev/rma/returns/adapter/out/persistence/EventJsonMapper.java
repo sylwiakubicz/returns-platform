@@ -11,9 +11,11 @@ import org.springframework.stereotype.Component;
 public class EventJsonMapper {
 
     private final ObjectMapper objectMapper;
+    private final EventUpcasting upcasting;
 
-    public EventJsonMapper(ObjectMapper objectMapper) {
+    public EventJsonMapper(ObjectMapper objectMapper, EventUpcasting upcasting) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.upcasting = Objects.requireNonNull(upcasting, "upcasting must not be null");
     }
 
     public String toJson(DomainEvent event) {
@@ -28,10 +30,6 @@ public class EventJsonMapper {
     public DomainEvent fromJson(String type, int schemaVersion, String payload) {
         Objects.requireNonNull(type, "type must not be null");
         Objects.requireNonNull(payload, "payload must not be null");
-        if (schemaVersion != 1) {
-            throw new IllegalArgumentException(
-                    "Unsupported schema version " + schemaVersion + " for event " + type);
-        }
         Class<? extends DomainEvent> eventClass = switch (type) {
             case "RmaRequested" -> RmaRequested.class;
             case "LabelIssued" -> LabelIssued.class;
@@ -51,7 +49,8 @@ public class EventJsonMapper {
         };
 
         try {
-            DomainEvent event = objectMapper.readValue(payload, eventClass);
+            String currentPayload = upcasting.upcast(type, schemaVersion, currentSchemaVersion(eventClass), payload);
+            DomainEvent event = objectMapper.readValue(currentPayload, eventClass);
             if (event == null) {
                 throw new IllegalStateException(
                         "Event payload must not be JSON null for event " + type);
@@ -84,6 +83,12 @@ public class EventJsonMapper {
     }
 
     public int schemaVersionOf(DomainEvent event) {
+        Objects.requireNonNull(event, "event must not be null");
+        return currentSchemaVersion(event.getClass());
+    }
+
+    private int currentSchemaVersion(Class<? extends DomainEvent> eventClass) {
+        // Wszystkie obecne typy zdarzeń mają pierwszy format JSON.
         return 1;
     }
 }

@@ -237,7 +237,7 @@ class PostgresEventStoreIT {
 
     @Configuration
     @EnableTransactionManagement
-    @Import({PostgresEventStore.class, EventJsonMapper.class})
+    @Import({PostgresEventStore.class, EventJsonMapper.class, EventUpcasting.class})
     static class TestConfig {
         @Bean
         DataSource dataSource() {

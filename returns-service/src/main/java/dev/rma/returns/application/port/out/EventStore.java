@@ -30,6 +30,8 @@ public interface EventStore {
      * Zwraca pusty strumień, gdy brak pasujących zdarzeń.
      * Wywołujący odpowiada za domknięcie strumienia i utrzymanie transakcji
      * przez czas jego konsumowania.
+     *
+     * @param fromVersion pierwsza uwzględniana wersja, co najmniej 1
      */
     Stream<StoredEvent> readFrom(UUID rmaId, long fromVersion);
 }
