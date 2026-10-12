@@ -1,11 +1,14 @@
 package dev.rma.returns.adapter.out.persistence;
 
 import dev.rma.returns.application.port.out.EventStore;
+import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.application.port.out.StoredEvent;
 import dev.rma.returns.domain.Rma;
 import dev.rma.returns.domain.events.DomainEvent;
 import jakarta.transaction.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.postgresql.util.PSQLException;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
@@ -60,8 +63,30 @@ public class PostgresEventStore implements EventStore {
             int schemaVersion = mapper.schemaVersionOf(event);
             Timestamp occurredAt = Timestamp.from(event.occurredAt());
 
-            jdbcTemplate.update(sql, eventId, rmaId, (int) version, type, schemaVersion, payload, occurredAt);
+            try {
+                jdbcTemplate.update(sql, eventId, rmaId, (int) version, type, schemaVersion, payload, occurredAt);
+            } catch (DataIntegrityViolationException exception) {
+                if (isVersionConflict(exception)) {
+                    throw new ConcurrencyConflictException(
+                            "Concurrent update of RMA " + rmaId + " at expected version " + expectedVersion,
+                            exception);
+                }
+                throw exception;
+            }
         }
+    }
+
+    private boolean isVersionConflict(Throwable exception) {
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            if (cause instanceof PSQLException postgresException
+                    && "23505".equals(postgresException.getSQLState())
+                    && postgresException.getServerErrorMessage() != null
+                    && "unique_rma_id_version".equals(
+                            postgresException.getServerErrorMessage().getConstraint())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
