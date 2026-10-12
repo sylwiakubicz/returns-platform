@@ -298,6 +298,46 @@ class RmaLifecycleTest {
         assertThat(rma.items().getFirst().grade()).isEqualTo(ItemGrade.C);
     }
 
+    @ParameterizedTest
+    @EnumSource(RmaStatus.class)
+    void shouldRestoreEveryLifecycleStateAndReplayItsRemainingHistory(RmaStatus status) {
+        List<DomainEvent> history = historyFor(status);
+        Rma expected = Rma.fromHistory(history);
+        for (int split = 1; split <= history.size(); split++) {
+            RmaState state = Rma.fromHistory(history.subList(0, split)).state();
+            Rma restored = Rma.fromState(state, history.subList(split, history.size()));
+            assertThat(restored).usingRecursiveComparison().isEqualTo(expected);
+        }
+    }
+
+    @Test
+    void shouldKeepSavedStateUnchangedWhenRestoredRmaExecutesCommand() {
+        Rma original = Rma.fromHistory(historyFor(RmaStatus.REQUESTED));
+        RmaState state = original.state();
+        Rma restored = Rma.fromState(state, List.of());
+
+        restored.issueLabel("new-label", "tracking", "label.pdf", AT);
+
+        assertThat(state.status()).isEqualTo(RmaStatus.REQUESTED);
+        assertThat(state.version()).isEqualTo(1);
+        assertThat(state.labelId()).isNull();
+        assertThat(original.state()).isEqualTo(state);
+        assertThat(restored.version()).isEqualTo(2);
+        assertThatThrownBy(() -> state.items().clear()).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
+    void shouldRejectCreationEventAndEventsOfAnotherRmaAfterSavedState() {
+        RmaState state = Rma.fromHistory(historyFor(RmaStatus.REQUESTED)).state();
+        assertThatThrownBy(() -> Rma.fromState(state, historyFor(RmaStatus.REQUESTED)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("RmaRequested must not appear after a saved state");
+        DomainEvent foreignEvent = new LabelIssued(UUID.randomUUID(), "label", "tracking", "label.pdf", AT);
+        assertThatThrownBy(() -> Rma.fromState(state, List.of(foreignEvent)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Subsequent event must belong to the restored RMA");
+    }
+
     private static List<DomainEvent> positiveHistory() {
         List<DomainEvent> events = new ArrayList<>(historyFor(RmaStatus.REQUESTED));
         Rma rma = Rma.fromHistory(events);

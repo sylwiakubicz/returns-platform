@@ -313,6 +313,67 @@ public final class Rma {
         return rma;
     }
 
+    /** Udostępnia niemutowalny stan do późniejszego odtworzenia agregatu. */
+    public RmaState state() {
+        return new RmaState(
+                rmaId, businessNumber, orderId, customerId, orderDeliveredAt, reason, customerNote,
+                status, version, items, currency, labelId, trackingNumber, pickupScheduledFor,
+                parcelReceivedAt, inspectedAt, inspectorId, refundAmount, deductionTotal,
+                payoutAttempt, payoutId, failureCode, closedAt, closureReason);
+    }
+
+    /**
+     * Odtwarza zapisany stan i stosuje wyłącznie późniejsze zdarzenia w kolejności historii.
+     * Wywołujący odpowiada za wybór zdarzeń po wersji stanu; zdarzenia nie zawierają numerów wersji.
+     */
+    public static Rma fromState(RmaState state, List<DomainEvent> subsequentEvents) {
+        Objects.requireNonNull(state, "state must not be null");
+        Objects.requireNonNull(subsequentEvents, "subsequentEvents must not be null");
+        if (state.version() > Integer.MAX_VALUE - subsequentEvents.size()) {
+            throw new IllegalArgumentException("Restored version exceeds the INTEGER range");
+        }
+        for (DomainEvent event : subsequentEvents) {
+            Objects.requireNonNull(event, "Subsequent event must not be null");
+            if (!state.rmaId().equals(event.rmaId())) {
+                throw new IllegalArgumentException("Subsequent event must belong to the restored RMA");
+            }
+            if (event instanceof RmaRequested) {
+                throw new IllegalArgumentException("RmaRequested must not appear after a saved state");
+            }
+        }
+
+        var rma = new Rma();
+        rma.rmaId = state.rmaId();
+        rma.businessNumber = state.businessNumber();
+        rma.orderId = state.orderId();
+        rma.customerId = state.customerId();
+        rma.orderDeliveredAt = state.orderDeliveredAt();
+        rma.reason = state.reason();
+        rma.customerNote = state.customerNote();
+        rma.status = state.status();
+        rma.version = state.version();
+        rma.items = state.items();
+        rma.currency = state.currency();
+        rma.labelId = state.labelId();
+        rma.trackingNumber = state.trackingNumber();
+        rma.pickupScheduledFor = state.pickupScheduledFor();
+        rma.parcelReceivedAt = state.parcelReceivedAt();
+        rma.inspectedAt = state.inspectedAt();
+        rma.inspectorId = state.inspectorId();
+        rma.refundAmount = state.refundAmount();
+        rma.deductionTotal = state.deductionTotal();
+        rma.payoutAttempt = state.payoutAttempt();
+        rma.payoutId = state.payoutId();
+        rma.failureCode = state.failureCode();
+        rma.closedAt = state.closedAt();
+        rma.closureReason = state.closureReason();
+
+        for (DomainEvent event : subsequentEvents) {
+            rma.apply(event);
+        }
+        return rma;
+    }
+
     private void apply(DomainEvent event) {
         switch (event) {
             case RmaRequested e -> apply(e);
