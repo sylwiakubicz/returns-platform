@@ -316,10 +316,30 @@ public final class Rma {
     /** Udostępnia niemutowalny stan do późniejszego odtworzenia agregatu. */
     public RmaState state() {
         return new RmaState(
-                rmaId, businessNumber, orderId, customerId, orderDeliveredAt, reason, customerNote,
-                status, version, items, currency, labelId, trackingNumber, pickupScheduledFor,
-                parcelReceivedAt, inspectedAt, inspectorId, refundAmount, deductionTotal,
-                payoutAttempt, payoutId, failureCode, closedAt, closureReason);
+                rmaId,
+                businessNumber,
+                orderId,
+                customerId,
+                orderDeliveredAt,
+                reason,
+                customerNote,
+                status,
+                version,
+                items,
+                currency,
+                labelId,
+                trackingNumber,
+                pickupScheduledFor,
+                parcelReceivedAt,
+                inspectedAt,
+                inspectorId,
+                refundAmount,
+                deductionTotal,
+                payoutAttempt,
+                payoutId,
+                failureCode,
+                closedAt,
+                closureReason);
     }
 
     /**

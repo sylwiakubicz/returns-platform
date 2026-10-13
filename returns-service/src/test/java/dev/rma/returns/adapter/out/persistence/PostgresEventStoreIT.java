@@ -6,9 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Currency;
 import java.util.List;
-import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -16,44 +16,45 @@ import java.util.concurrent.TimeUnit;
 
 import javax.sql.DataSource;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.RepeatedTest;
-import org.springframework.dao.DataIntegrityViolationException;
+import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
-import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.application.port.out.EventStore;
 import dev.rma.returns.application.port.out.StoredEvent;
-import dev.rma.returns.application.exception.ConcurrencyConflictException;
+import dev.rma.returns.domain.InspectionResult;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.RequestedItem;
 import dev.rma.returns.domain.Rma;
-import dev.rma.returns.domain.InspectionResult;
-import dev.rma.returns.domain.enums.ItemGrade;
 import dev.rma.returns.domain.enums.FailureCode;
-import dev.rma.returns.domain.policy.InspectionPolicy;
-import dev.rma.returns.domain.policy.RefundPolicy;
+import dev.rma.returns.domain.enums.ItemGrade;
 import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
 import dev.rma.returns.domain.events.DomainEvent;
 import dev.rma.returns.domain.events.RmaRequested;
+import dev.rma.returns.domain.policy.InspectionPolicy;
+import dev.rma.returns.domain.policy.RefundPolicy;
 
 @Testcontainers
 @SpringJUnitConfig(PostgresEventStoreIT.TestConfig.class)
@@ -81,16 +82,11 @@ class PostgresEventStoreIT {
 
         Rma original = Rma.fromHistory(List.of(requested));
         List<DomainEvent> events = List.of(
-            requested,
-            original.issueLabel(
-                "label", "tracking", "label.pdf",
-                requestedAt.plusSeconds(60)),
-            original.schedulePickup(
-                "pickup", LocalDate.of(2026, 10, 3),
-                requestedAt.plusSeconds(120)));
-//        events   = [RmaRequested, LabelIssued, PickupScheduled]
-//        original = status PICKUP_SCHEDULED, version 3
-
+                requested,
+                original.issueLabel("label", "tracking", "label.pdf", requestedAt.plusSeconds(60)),
+                original.schedulePickup("pickup", LocalDate.of(2026, 10, 3), requestedAt.plusSeconds(120)));
+        //        events   = [RmaRequested, LabelIssued, PickupScheduled]
+        //        original = status PICKUP_SCHEDULED, version 3
 
         eventStore.append(rmaId, 0, events);
 
@@ -99,7 +95,9 @@ class PostgresEventStoreIT {
         assertThat(restored.version()).isEqualTo(3);
         assertThat(restored).usingRecursiveComparison().isEqualTo(original);
         assertThat(jdbcTemplate.queryForList(
-                "SELECT version FROM returns.rma_events WHERE rma_id = ? ORDER BY version", Integer.class, rmaId))
+                        "SELECT version FROM returns.rma_events WHERE rma_id = ? ORDER BY version",
+                        Integer.class,
+                        rmaId))
                 .containsExactly(1, 2, 3);
     }
 
@@ -113,7 +111,8 @@ class PostgresEventStoreIT {
         UUID rmaId = UUID.randomUUID();
         RmaRequested requested = requested(rmaId);
         Rma rma = Rma.fromHistory(List.of(requested));
-        List<DomainEvent> events = List.of(requested,
+        List<DomainEvent> events = List.of(
+                requested,
                 rma.issueLabel("label", "tracking", "label.pdf", requested.requestedAt()),
                 rma.schedulePickup("pickup", LocalDate.of(2026, 10, 3), requested.requestedAt()));
         eventStore.append(rmaId, 0, events);
@@ -124,14 +123,18 @@ class PostgresEventStoreIT {
             try (var stream = eventStore.readFrom(rmaId, 2)) {
                 List<StoredEvent> stored = stream.toList();
                 assertThat(stored).extracting(StoredEvent::version).containsExactly(2L, 3L);
-                assertThat(stored).extracting(StoredEvent::eventId).doesNotHaveDuplicates().doesNotContainNull();
+                assertThat(stored)
+                        .extracting(StoredEvent::eventId)
+                        .doesNotHaveDuplicates()
+                        .doesNotContainNull();
                 assertThat(stored).allSatisfy(event -> {
                     assertThat(event.rmaId()).isEqualTo(rmaId);
                     assertThat(event.schemaVersion()).isEqualTo(1);
                     assertThat(event.occurredAt()).isEqualTo(requested.requestedAt());
                 });
-                assertThat(stored.stream().map(event -> mapper.fromJson(
-                        event.type(), event.schemaVersion(), event.payload())).toList())
+                assertThat(stored.stream()
+                                .map(event -> mapper.fromJson(event.type(), event.schemaVersion(), event.payload()))
+                                .toList())
                         .containsExactlyElementsOf(events.subList(1, 3));
             }
         });
@@ -218,14 +221,16 @@ class PostgresEventStoreIT {
                 rma.issueLabel("label", "tracking", "label.pdf", requested.requestedAt()),
                 rma.schedulePickup("pickup", LocalDate.of(2026, 10, 3), requested.requestedAt()));
         // Wyłącznie testowe ograniczenie: wymuszamy błąd drugiego INSERT-a.
-        jdbcTemplate.execute("ALTER TABLE returns.rma_events ADD CONSTRAINT test_reject_pickup CHECK ("
-                + "rma_id <> '" + rmaId + "'::uuid OR type <> 'PickupScheduled')");
+        jdbcTemplate.execute("ALTER TABLE returns.rma_events ADD CONSTRAINT test_reject_pickup CHECK (" + "rma_id <> '"
+                + rmaId + "'::uuid OR type <> 'PickupScheduled')");
         try {
             assertThatThrownBy(() -> eventStore.append(rmaId, 1, events))
                     .isInstanceOf(DataIntegrityViolationException.class);
             assertThat(jdbcTemplate.queryForList(
-                    "SELECT version FROM returns.rma_events WHERE rma_id = ? ORDER BY version",
-                    Integer.class, rmaId)).containsExactly(1);
+                            "SELECT version FROM returns.rma_events WHERE rma_id = ? ORDER BY version",
+                            Integer.class,
+                            rmaId))
+                    .containsExactly(1);
         } finally {
             jdbcTemplate.execute("ALTER TABLE returns.rma_events DROP CONSTRAINT test_reject_pickup");
         }
@@ -238,17 +243,20 @@ class PostgresEventStoreIT {
             List<DomainEvent> history = refundableHistory(rmaId, finalVersion);
             eventStore.append(rmaId, 0, history.subList(0, 49));
             assertThat(jdbcTemplate.queryForObject(
-                    "SELECT count(*) FROM returns.rma_snapshots WHERE rma_id = ?", Long.class, rmaId)).isZero();
+                            "SELECT count(*) FROM returns.rma_snapshots WHERE rma_id = ?", Long.class, rmaId))
+                    .isZero();
 
             eventStore.append(rmaId, 49, history.subList(49, finalVersion));
 
             assertThat(jdbcTemplate.queryForList(
-                    "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
+                            "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
                     .containsExactly(finalVersion);
             String json = jdbcTemplate.queryForObject(
                     "SELECT state FROM returns.rma_snapshots WHERE rma_id = ?", String.class, rmaId);
-            var stateMapper = new RmaStateJsonMapper(Jackson2ObjectMapperBuilder.json().build());
-            assertThat(stateMapper.fromJson(json)).isEqualTo(Rma.fromHistory(history).state());
+            var stateMapper =
+                    new RmaStateJsonMapper(Jackson2ObjectMapperBuilder.json().build());
+            assertThat(stateMapper.fromJson(json))
+                    .isEqualTo(Rma.fromHistory(history).state());
         }
     }
 
@@ -264,7 +272,8 @@ class PostgresEventStoreIT {
                     .isInstanceOf(DataIntegrityViolationException.class);
             assertThat(eventStore.load(rmaId).orElseThrow().version()).isEqualTo(49);
             assertThat(jdbcTemplate.queryForObject(
-                    "SELECT count(*) FROM returns.rma_snapshots WHERE rma_id = ?", Long.class, rmaId)).isZero();
+                            "SELECT count(*) FROM returns.rma_snapshots WHERE rma_id = ?", Long.class, rmaId))
+                    .isZero();
         } finally {
             jdbcTemplate.execute("ALTER TABLE returns.rma_snapshots DROP CONSTRAINT test_reject_snapshot");
         }
@@ -276,7 +285,7 @@ class PostgresEventStoreIT {
         List<DomainEvent> history = refundableHistory(rmaId, 50);
         eventStore.append(rmaId, 0, history);
         assertThat(jdbcTemplate.queryForList(
-                "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
+                        "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
                 .containsExactly(50);
 
         makeCoveredEventsUnreadable(rmaId, 50);
@@ -293,7 +302,7 @@ class PostgresEventStoreIT {
         eventStore.append(rmaId, 0, history.subList(0, 50));
         eventStore.append(rmaId, 50, history.subList(50, 53));
         assertThat(jdbcTemplate.queryForList(
-                "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
+                        "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
                 .containsExactly(50);
 
         makeCoveredEventsUnreadable(rmaId, 50);
@@ -311,14 +320,19 @@ class PostgresEventStoreIT {
         eventStore.append(rmaId, 50, history.subList(50, 100));
         eventStore.append(rmaId, 100, history.subList(100, 103));
         assertThat(jdbcTemplate.queryForList(
-                "SELECT version FROM returns.rma_snapshots WHERE rma_id = ? ORDER BY version",
-                Integer.class, rmaId)).containsExactly(50, 100);
+                        "SELECT version FROM returns.rma_snapshots WHERE rma_id = ? ORDER BY version",
+                        Integer.class,
+                        rmaId))
+                .containsExactly(50, 100);
 
         // Tylko baza testowa: starszy snapshot nie może być użyty ani deserializowany.
-        assertThat(jdbcTemplate.update("""
+        assertThat(jdbcTemplate.update(
+                        """
                 UPDATE returns.rma_snapshots SET state = '{}'::jsonb
                 WHERE rma_id = ? AND version = 50
-                """, rmaId)).isEqualTo(1);
+                """,
+                        rmaId))
+                .isEqualTo(1);
         makeCoveredEventsUnreadable(rmaId, 100);
 
         Rma restored = eventStore.load(rmaId).orElseThrow();
@@ -329,10 +343,14 @@ class PostgresEventStoreIT {
     private void makeCoveredEventsUnreadable(UUID rmaId, int throughVersion) {
         // Po utworzeniu snapshotu zmieniamy typ wyłącznie w izolowanej bazie testowej.
         // W produkcji historia pozostaje append-only; test łączy się jako właściciel bazy.
-        assertThat(jdbcTemplate.update("""
+        assertThat(jdbcTemplate.update(
+                        """
                 UPDATE returns.rma_events SET type = 'UnreadableTestEvent'
                 WHERE rma_id = ? AND version <= ?
-                """, rmaId, throughVersion)).isEqualTo(throughVersion);
+                """,
+                        rmaId,
+                        throughVersion))
+                .isEqualTo(throughVersion);
     }
 
     private static List<DomainEvent> refundableHistory(UUID rmaId, int size) {
@@ -344,8 +362,11 @@ class PostgresEventStoreIT {
         history.add(rma.markParcelInTransit(at));
         history.add(rma.receive(at, "warehouse"));
         history.add(rma.startInspection("inspector", at));
-        history.addAll(rma.completeInspection("inspector", at,
-                List.of(new InspectionResult("item", ItemGrade.A, null, List.of())), null,
+        history.addAll(rma.completeInspection(
+                "inspector",
+                at,
+                List.of(new InspectionResult("item", ItemGrade.A, null, List.of())),
+                null,
                 new InspectionPolicy(new BigDecimal("500.00")),
                 new RefundPolicy(0, 15, 40, new BigDecimal("15.00"))));
         while (history.size() < size) {
@@ -360,11 +381,18 @@ class PostgresEventStoreIT {
     private static RmaRequested requested(UUID rmaId) {
         Instant at = Instant.parse("2026-10-01T12:00:00Z");
         Currency currency = Currency.getInstance("PLN");
-        return Rma.request(rmaId, "RMA-2026-000001", "order", "customer", at.minusSeconds(86400),
-                RmaReason.CHANGED_MIND, null,
-                List.of(new RequestedItem("item", "sku", "Hobbit", 1,
-                        new Money(new BigDecimal("100.00"), currency))),
-                currency, at, 14);
+        return Rma.request(
+                rmaId,
+                "RMA-2026-000001",
+                "order",
+                "customer",
+                at.minusSeconds(86400),
+                RmaReason.CHANGED_MIND,
+                null,
+                List.of(new RequestedItem("item", "sku", "Hobbit", 1, new Money(new BigDecimal("100.00"), currency))),
+                currency,
+                at,
+                14);
     }
 
     @Configuration
@@ -373,14 +401,14 @@ class PostgresEventStoreIT {
     static class TestConfig {
         @Bean
         DataSource dataSource() {
-            DataSource dataSource = new DriverManagerDataSource(
-                    POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+            DataSource dataSource =
+                    new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
             // Migracja zakłada, że infrastruktura utworzyła już rolę i schemat.
             jdbc.execute("CREATE ROLE returns_app");
             jdbc.execute("CREATE SCHEMA returns");
-            new ResourceDatabasePopulator(new ClassPathResource(
-                    "db/migration/V1__create_returns_schema.sql")).execute(dataSource);
+            new ResourceDatabasePopulator(new ClassPathResource("db/migration/V1__create_returns_schema.sql"))
+                    .execute(dataSource);
             return dataSource;
         }
 

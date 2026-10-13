@@ -3,10 +3,11 @@ package dev.rma.returns.adapter.out.persistence;
 import java.util.List;
 import java.util.Objects;
 
+import org.springframework.stereotype.Component;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.stereotype.Component;
 
 /** Uruchamia kolejne transformacje bez modyfikowania historii w bazie. */
 @Component
@@ -22,12 +23,13 @@ public class EventUpcasting {
             if (upcaster.fromVersion() < 1 || upcaster.toVersion() != upcaster.fromVersion() + 1L) {
                 throw new IllegalArgumentException("An upcaster must advance exactly one schema version");
             }
-            long matches = this.upcasters.stream().filter(candidate ->
-                    candidate.type().equals(upcaster.type())
-                            && candidate.fromVersion() == upcaster.fromVersion()).count();
+            long matches = this.upcasters.stream()
+                    .filter(candidate -> candidate.type().equals(upcaster.type())
+                            && candidate.fromVersion() == upcaster.fromVersion())
+                    .count();
             if (matches != 1) {
-                throw new IllegalArgumentException("Duplicate upcaster for " + upcaster.type()
-                        + " at version " + upcaster.fromVersion());
+                throw new IllegalArgumentException(
+                        "Duplicate upcaster for " + upcaster.type() + " at version " + upcaster.fromVersion());
             }
         }
     }

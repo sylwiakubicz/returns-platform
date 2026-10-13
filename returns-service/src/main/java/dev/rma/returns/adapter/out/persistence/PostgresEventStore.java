@@ -1,19 +1,5 @@
 package dev.rma.returns.adapter.out.persistence;
 
-import dev.rma.returns.application.port.out.EventStore;
-import dev.rma.returns.application.exception.ConcurrencyConflictException;
-import dev.rma.returns.application.port.out.StoredEvent;
-import dev.rma.returns.domain.Rma;
-import dev.rma.returns.domain.RmaState;
-import dev.rma.returns.domain.events.DomainEvent;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.postgresql.util.PSQLException;
-import org.springframework.stereotype.Repository;
-import org.springframework.beans.factory.annotation.Value;
-
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -21,6 +7,21 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
+
+import org.postgresql.util.PSQLException;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import dev.rma.returns.application.exception.ConcurrencyConflictException;
+import dev.rma.returns.application.port.out.EventStore;
+import dev.rma.returns.application.port.out.StoredEvent;
+import dev.rma.returns.domain.Rma;
+import dev.rma.returns.domain.RmaState;
+import dev.rma.returns.domain.events.DomainEvent;
 
 @Repository
 public class PostgresEventStore implements EventStore {
@@ -30,7 +31,9 @@ public class PostgresEventStore implements EventStore {
     private final RmaStateJsonMapper stateMapper;
     private final int snapshotEveryNEvents;
 
-    public PostgresEventStore(JdbcTemplate jdbcTemplate, EventJsonMapper mapper,
+    public PostgresEventStore(
+            JdbcTemplate jdbcTemplate,
+            EventJsonMapper mapper,
             RmaStateJsonMapper stateMapper,
             @Value("${returns.snapshot-every-n-events:50}") int snapshotEveryNEvents) {
         this.jdbcTemplate = jdbcTemplate;
@@ -64,7 +67,8 @@ public class PostgresEventStore implements EventStore {
             }
         }
 
-        String sql = """
+        String sql =
+                """
                 INSERT INTO returns.rma_events
                     (event_id, rma_id, version, type, schema_version, payload, occurred_at)
                 VALUES (?, ?, ?, ?, ?, CAST(? AS jsonb), ?)
@@ -84,8 +88,7 @@ public class PostgresEventStore implements EventStore {
             } catch (DataIntegrityViolationException exception) {
                 if (isVersionConflict(exception)) {
                     throw new ConcurrencyConflictException(
-                            "Concurrent update of RMA " + rmaId + " at expected version " + expectedVersion,
-                            exception);
+                            "Concurrent update of RMA " + rmaId + " at expected version " + expectedVersion, exception);
                 }
                 throw exception;
             }
@@ -97,24 +100,33 @@ public class PostgresEventStore implements EventStore {
     }
 
     private void saveSnapshot(UUID rmaId, long version) {
-        List<DomainEvent> history = jdbcTemplate.query("""
+        List<DomainEvent> history = jdbcTemplate.query(
+                """
                 SELECT type, schema_version, payload
                 FROM returns.rma_events
                 WHERE rma_id = ? AND version <= ?
                 ORDER BY version ASC
                 """,
-                (resultSet, rowNum) -> mapper.fromJson(resultSet.getString("type"),
-                        resultSet.getInt("schema_version"), resultSet.getString("payload")),
-                rmaId, version);
+                (resultSet, rowNum) -> mapper.fromJson(
+                        resultSet.getString("type"),
+                        resultSet.getInt("schema_version"),
+                        resultSet.getString("payload")),
+                rmaId,
+                version);
         Rma rma = Rma.fromHistory(history);
         if (rma.version() != version) {
             throw new IllegalStateException("Event history is incomplete for RMA " + rmaId);
         }
         String state = stateMapper.toJson(rma.state());
-        jdbcTemplate.update("""
+        jdbcTemplate.update(
+                """
                 INSERT INTO returns.rma_snapshots (rma_id, version, state, created_at)
                 VALUES (?, ?, CAST(? AS jsonb), ?)
-                """, rmaId, (int) version, state, Timestamp.from(Instant.now()));
+                """,
+                rmaId,
+                (int) version,
+                state,
+                Timestamp.from(Instant.now()));
     }
 
     private boolean isVersionConflict(Throwable exception) {
@@ -122,8 +134,8 @@ public class PostgresEventStore implements EventStore {
             if (cause instanceof PSQLException postgresException
                     && "23505".equals(postgresException.getSQLState())
                     && postgresException.getServerErrorMessage() != null
-                    && "unique_rma_id_version".equals(
-                            postgresException.getServerErrorMessage().getConstraint())) {
+                    && "unique_rma_id_version"
+                            .equals(postgresException.getServerErrorMessage().getConstraint())) {
                 return true;
             }
         }
@@ -134,16 +146,18 @@ public class PostgresEventStore implements EventStore {
     public Optional<Rma> load(UUID rmaId) {
         Objects.requireNonNull(rmaId, "RmaId must not be null");
 
-        String sqlSnapshot = """
+        String sqlSnapshot =
+                """
             SELECT state FROM returns.rma_snapshots
             WHERE rma_id = ? ORDER BY version DESC LIMIT 1
             """;
 
-        List<RmaState> state = jdbcTemplate.query(sqlSnapshot,
-            (resultSet, rowNum) -> stateMapper.fromJson(resultSet.getString("state")), rmaId);
+        List<RmaState> state = jdbcTemplate.query(
+                sqlSnapshot, (resultSet, rowNum) -> stateMapper.fromJson(resultSet.getString("state")), rmaId);
 
         if (!state.isEmpty()) {
-            List<DomainEvent> history = loadHistoryEvents(rmaId, state.getFirst().version());
+            List<DomainEvent> history =
+                    loadHistoryEvents(rmaId, state.getFirst().version());
             return Optional.of(Rma.fromState(state.getFirst(), history));
         } else {
             List<DomainEvent> history = loadHistoryEvents(rmaId, 0);
@@ -154,12 +168,11 @@ public class PostgresEventStore implements EventStore {
 
             return Optional.of(Rma.fromHistory(history));
         }
-
-
     }
 
     private List<DomainEvent> loadHistoryEvents(UUID rmaId, int afterVersion) {
-        String sql = """
+        String sql =
+                """
                 SELECT type, schema_version, payload
                 FROM returns.rma_events
                 WHERE rma_id = ? AND version > ?
@@ -167,12 +180,13 @@ public class PostgresEventStore implements EventStore {
                 """;
 
         return jdbcTemplate.query(
-            sql,
-            (resultSet, rowNum) -> mapper.fromJson(
-                resultSet.getString("type"),
-                resultSet.getInt("schema_version"),
-                resultSet.getString("payload")),
-            rmaId, afterVersion);
+                sql,
+                (resultSet, rowNum) -> mapper.fromJson(
+                        resultSet.getString("type"),
+                        resultSet.getInt("schema_version"),
+                        resultSet.getString("payload")),
+                rmaId,
+                afterVersion);
     }
 
     @Override
@@ -183,7 +197,8 @@ public class PostgresEventStore implements EventStore {
             throw new IllegalArgumentException("From version must be at least 1");
         }
 
-        String sql = """
+        String sql =
+                """
                 SELECT event_id, rma_id, version, type, schema_version, payload, occurred_at
                 FROM returns.rma_events
                 WHERE rma_id = ? AND version >= ?

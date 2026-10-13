@@ -2,9 +2,10 @@ package dev.rma.returns.adapter.out.persistence;
 
 import java.util.Objects;
 
+import org.springframework.stereotype.Component;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.stereotype.Component;
 
 import dev.rma.returns.domain.RmaState;
 
