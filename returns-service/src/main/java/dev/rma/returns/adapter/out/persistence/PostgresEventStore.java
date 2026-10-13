@@ -4,6 +4,7 @@ import dev.rma.returns.application.port.out.EventStore;
 import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.application.port.out.StoredEvent;
 import dev.rma.returns.domain.Rma;
+import dev.rma.returns.domain.RmaState;
 import dev.rma.returns.domain.events.DomainEvent;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
@@ -133,25 +134,45 @@ public class PostgresEventStore implements EventStore {
     public Optional<Rma> load(UUID rmaId) {
         Objects.requireNonNull(rmaId, "RmaId must not be null");
 
+        String sqlSnapshot = """
+            SELECT state FROM returns.rma_snapshots
+            WHERE rma_id = ? ORDER BY version DESC LIMIT 1
+            """;
+
+        List<RmaState> state = jdbcTemplate.query(sqlSnapshot,
+            (resultSet, rowNum) -> stateMapper.fromJson(resultSet.getString("state")), rmaId);
+
+        if (!state.isEmpty()) {
+            List<DomainEvent> history = loadHistoryEvents(rmaId, state.getFirst().version());
+            return Optional.of(Rma.fromState(state.getFirst(), history));
+        } else {
+            List<DomainEvent> history = loadHistoryEvents(rmaId, 0);
+
+            if (history.isEmpty()) {
+                return Optional.empty();
+            }
+
+            return Optional.of(Rma.fromHistory(history));
+        }
+
+
+    }
+
+    private List<DomainEvent> loadHistoryEvents(UUID rmaId, int afterVersion) {
         String sql = """
                 SELECT type, schema_version, payload
                 FROM returns.rma_events
-                WHERE rma_id = ?
+                WHERE rma_id = ? AND version > ?
                 ORDER BY version ASC
                 """;
 
-        List<DomainEvent> history = jdbcTemplate.query(
-                sql,
-                (resultSet, rowNum) -> mapper.fromJson(
-                        resultSet.getString("type"),
-                        resultSet.getInt("schema_version"),
-                        resultSet.getString("payload")),
-                rmaId);
-
-        if (history.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(Rma.fromHistory(history));
+        return jdbcTemplate.query(
+            sql,
+            (resultSet, rowNum) -> mapper.fromJson(
+                resultSet.getString("type"),
+                resultSet.getInt("schema_version"),
+                resultSet.getString("payload")),
+            rmaId, afterVersion);
     }
 
     @Override
