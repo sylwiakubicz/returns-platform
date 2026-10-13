@@ -8,8 +8,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
-import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
-import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import org.postgresql.util.PSQLException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -18,8 +16,11 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
+import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.application.port.out.EventStore;
+import dev.rma.returns.application.port.out.RmaProjectionUpdater;
 import dev.rma.returns.application.port.out.StoredEvent;
 import dev.rma.returns.domain.Rma;
 import dev.rma.returns.domain.RmaState;
@@ -31,16 +32,19 @@ public class PostgresEventStore implements EventStore {
     private final JdbcTemplate jdbcTemplate;
     private final EventJsonMapper mapper;
     private final RmaStateJsonMapper stateMapper;
+    private final RmaProjectionUpdater projectionUpdater;
     private final int snapshotEveryNEvents;
 
     public PostgresEventStore(
             JdbcTemplate jdbcTemplate,
             EventJsonMapper mapper,
             RmaStateJsonMapper stateMapper,
+            RmaProjectionUpdater projectionUpdater,
             @Value("${returns.snapshot-every-n-events:50}") int snapshotEveryNEvents) {
         this.jdbcTemplate = jdbcTemplate;
         this.mapper = mapper;
         this.stateMapper = stateMapper;
+        this.projectionUpdater = projectionUpdater;
         if (snapshotEveryNEvents < 1) {
             throw new IllegalArgumentException("Snapshot interval must be positive");
         }
@@ -94,6 +98,10 @@ public class PostgresEventStore implements EventStore {
                 }
                 throw exception;
             }
+        }
+
+        for (DomainEvent event : events) {
+            projectionUpdater.apply(event);
         }
 
         if (expectedVersion / snapshotEveryNEvents < version / snapshotEveryNEvents) {

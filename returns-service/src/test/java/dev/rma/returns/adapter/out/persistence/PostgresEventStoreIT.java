@@ -16,8 +16,6 @@ import java.util.concurrent.TimeUnit;
 
 import javax.sql.DataSource;
 
-import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
-import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +40,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
+import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.application.port.out.EventStore;
 import dev.rma.returns.application.port.out.StoredEvent;
@@ -385,7 +385,7 @@ class PostgresEventStoreIT {
         Currency currency = Currency.getInstance("PLN");
         return Rma.request(
                 rmaId,
-                "RMA-2026-000001",
+                "RMA-2026-" + rmaId,
                 "order",
                 "customer",
                 at.minusSeconds(86400),
@@ -399,7 +399,13 @@ class PostgresEventStoreIT {
 
     @Configuration
     @EnableTransactionManagement
-    @Import({PostgresEventStore.class, EventJsonMapper.class, EventUpcasting.class, RmaStateJsonMapper.class})
+    @Import({
+        PostgresEventStore.class,
+        PostgresRmaProjectionUpdater.class,
+        EventJsonMapper.class,
+        EventUpcasting.class,
+        RmaStateJsonMapper.class
+    })
     static class TestConfig {
         @Bean
         DataSource dataSource() {
@@ -409,7 +415,9 @@ class PostgresEventStoreIT {
             // Migracja zakłada, że infrastruktura utworzyła już rolę i schemat.
             jdbc.execute("CREATE ROLE returns_app");
             jdbc.execute("CREATE SCHEMA returns");
-            new ResourceDatabasePopulator(new ClassPathResource("db/migration/V1__create_returns_schema.sql"))
+            new ResourceDatabasePopulator(
+                            new ClassPathResource("db/migration/V1__create_returns_schema.sql"),
+                            new ClassPathResource("db/migration/V2__allow_null_refund_amount_in_rma_projection.sql"))
                     .execute(dataSource);
             return dataSource;
         }
