@@ -34,4 +34,13 @@ public interface EventStore {
      * @param fromVersion pierwsza uwzględniana wersja, co najmniej 1
      */
     Stream<StoredEvent> readFrom(UUID rmaId, long fromVersion);
+
+    /**
+     * Czyta całą historię zdarzeń, uporządkowaną po rmaId i rosnąco po wersji.
+     * Obejmuje również zdarzenia sprzed snapshotów. Zwraca pusty strumień,
+     * gdy historia jest pusta.
+     * Wywołujący odpowiada za domknięcie strumienia i utrzymanie transakcji
+     * przez czas jego konsumowania.
+     */
+    Stream<StoredEvent> readAll();
 }

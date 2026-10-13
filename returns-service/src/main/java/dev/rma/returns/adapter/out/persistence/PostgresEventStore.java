@@ -1,5 +1,7 @@
 package dev.rma.returns.adapter.out.persistence;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -224,13 +226,36 @@ public class PostgresEventStore implements EventStore {
                     statement.setFetchSize(100);
                     return statement;
                 },
-                (resultSet, rowNum) -> new StoredEvent(
-                        resultSet.getObject("event_id", UUID.class),
-                        resultSet.getObject("rma_id", UUID.class),
-                        resultSet.getLong("version"),
-                        resultSet.getString("type"),
-                        resultSet.getInt("schema_version"),
-                        resultSet.getString("payload"),
-                        resultSet.getTimestamp("occurred_at").toInstant()));
+                this::mapStoredEvent);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY, readOnly = true)
+    public Stream<StoredEvent> readAll() {
+        String sql =
+                """
+                SELECT event_id, rma_id, version, type, schema_version, payload, occurred_at
+                FROM returns.rma_events
+                ORDER BY rma_id ASC, version ASC
+                """;
+
+        return jdbcTemplate.queryForStream(
+                connection -> {
+                    var statement = connection.prepareStatement(sql);
+                    statement.setFetchSize(100);
+                    return statement;
+                },
+                this::mapStoredEvent);
+    }
+
+    private StoredEvent mapStoredEvent(ResultSet resultSet, int rowNum) throws SQLException {
+        return new StoredEvent(
+                resultSet.getObject("event_id", UUID.class),
+                resultSet.getObject("rma_id", UUID.class),
+                resultSet.getLong("version"),
+                resultSet.getString("type"),
+                resultSet.getInt("schema_version"),
+                resultSet.getString("payload"),
+                resultSet.getTimestamp("occurred_at").toInstant());
     }
 }

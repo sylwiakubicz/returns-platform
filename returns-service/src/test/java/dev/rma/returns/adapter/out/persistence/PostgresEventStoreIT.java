@@ -8,6 +8,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
@@ -292,6 +293,78 @@ class PostgresEventStoreIT {
     void shouldRequireCallerTransactionForStreaming() {
         assertThatThrownBy(() -> eventStore.readFrom(UUID.randomUUID(), 1))
                 .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void shouldReadAllHistoryInRmaVersionOrderIncludingEventsCoveredBySnapshot() {
+        UUID firstId = UUID.randomUUID();
+        UUID secondId = UUID.randomUUID();
+        List<DomainEvent> history = refundableHistory(firstId, 103);
+        RmaRequested secondRequested = requested(secondId);
+        eventStore.append(firstId, 0, history.subList(0, 50));
+        eventStore.append(secondId, 0, List.of(secondRequested));
+        eventStore.append(firstId, 50, history.subList(50, 103));
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            try (var stream = eventStore.readAll()) {
+                List<StoredEvent> stored = stream.toList();
+                assertThat(stored)
+                        .hasSize(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class));
+                assertThat(stored)
+                        .isSortedAccordingTo(Comparator.comparing(
+                                        (StoredEvent event) -> event.rmaId().toString())
+                                .thenComparingLong(StoredEvent::version));
+                assertThat(stored)
+                        .extracting(StoredEvent::eventId)
+                        .doesNotHaveDuplicates()
+                        .doesNotContainNull();
+                List<StoredEvent> firstHistory = stored.stream()
+                        .filter(event -> event.rmaId().equals(firstId))
+                        .toList();
+                assertThat(firstHistory).hasSize(103);
+                for (int index = 0; index < firstHistory.size(); index++) {
+                    StoredEvent event = firstHistory.get(index);
+                    assertThat(event.version()).isEqualTo(index + 1L);
+                    assertThat(event.schemaVersion()).isEqualTo(1);
+                    assertThat(event.occurredAt()).isEqualTo(history.get(index).occurredAt());
+                    assertThat(mapper.fromJson(event.type(), event.schemaVersion(), event.payload()))
+                            .isEqualTo(history.get(index));
+                }
+                assertThat(stored.stream()
+                                .filter(event -> event.rmaId().equals(secondId))
+                                .toList())
+                        .singleElement()
+                        .satisfies(event -> {
+                            assertThat(event.version()).isEqualTo(1);
+                            assertThat(mapper.fromJson(event.type(), event.schemaVersion(), event.payload()))
+                                    .isEqualTo(secondRequested);
+                        });
+            }
+        });
+    }
+
+    @Test
+    void shouldReturnEmptyAllHistoryStreamAndAllowEarlyClosing() {
+        UUID rmaId = UUID.randomUUID();
+        eventStore.append(rmaId, 0, List.of(requested(rmaId)));
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            try (var stream = eventStore.readAll()) {
+                assertThat(stream.findFirst()).isPresent();
+            }
+            // Czyszczenie tylko w transakcji testowej; rollback przywraca historię innych testów.
+            status.setRollbackOnly();
+            jdbcTemplate.update("DELETE FROM returns.rma_snapshots");
+            jdbcTemplate.update("DELETE FROM returns.rma_events");
+            try (var stream = eventStore.readAll()) {
+                assertThat(stream.toList()).isEmpty();
+            }
+        });
+        assertThat(eventStore.load(rmaId)).isPresent();
+    }
+
+    @Test
+    void shouldRequireCallerTransactionForAllHistoryStreaming() {
+        assertThatThrownBy(() -> eventStore.readAll()).isInstanceOf(IllegalTransactionStateException.class);
     }
 
     @Test
