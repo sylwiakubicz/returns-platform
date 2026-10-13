@@ -8,6 +8,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Currency;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -44,6 +45,11 @@ import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.RequestedItem;
 import dev.rma.returns.domain.Rma;
+import dev.rma.returns.domain.InspectionResult;
+import dev.rma.returns.domain.enums.ItemGrade;
+import dev.rma.returns.domain.enums.FailureCode;
+import dev.rma.returns.domain.policy.InspectionPolicy;
+import dev.rma.returns.domain.policy.RefundPolicy;
 import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
 import dev.rma.returns.domain.events.DomainEvent;
@@ -225,6 +231,67 @@ class PostgresEventStoreIT {
         }
     }
 
+    @Test
+    void shouldSaveSnapshotAtFiftyAndWhenAppendCrossesThreshold() {
+        for (int finalVersion : List.of(50, 51)) {
+            UUID rmaId = UUID.randomUUID();
+            List<DomainEvent> history = refundableHistory(rmaId, finalVersion);
+            eventStore.append(rmaId, 0, history.subList(0, 49));
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM returns.rma_snapshots WHERE rma_id = ?", Long.class, rmaId)).isZero();
+
+            eventStore.append(rmaId, 49, history.subList(49, finalVersion));
+
+            assertThat(jdbcTemplate.queryForList(
+                    "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
+                    .containsExactly(finalVersion);
+            String json = jdbcTemplate.queryForObject(
+                    "SELECT state FROM returns.rma_snapshots WHERE rma_id = ?", String.class, rmaId);
+            var stateMapper = new RmaStateJsonMapper(Jackson2ObjectMapperBuilder.json().build());
+            assertThat(stateMapper.fromJson(json)).isEqualTo(Rma.fromHistory(history).state());
+        }
+    }
+
+    @Test
+    void shouldRollbackEventsWhenSnapshotInsertFails() {
+        UUID rmaId = UUID.randomUUID();
+        List<DomainEvent> history = refundableHistory(rmaId, 51);
+        eventStore.append(rmaId, 0, history.subList(0, 49));
+        jdbcTemplate.execute("ALTER TABLE returns.rma_snapshots ADD CONSTRAINT test_reject_snapshot CHECK ("
+                + "rma_id <> '" + rmaId + "'::uuid)");
+        try {
+            assertThatThrownBy(() -> eventStore.append(rmaId, 49, history.subList(49, 51)))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(eventStore.load(rmaId).orElseThrow().version()).isEqualTo(49);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT count(*) FROM returns.rma_snapshots WHERE rma_id = ?", Long.class, rmaId)).isZero();
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE returns.rma_snapshots DROP CONSTRAINT test_reject_snapshot");
+        }
+    }
+
+    private static List<DomainEvent> refundableHistory(UUID rmaId, int size) {
+        RmaRequested requested = requested(rmaId);
+        Instant at = requested.requestedAt();
+        List<DomainEvent> history = new ArrayList<>(List.of(requested));
+        Rma rma = Rma.fromHistory(history);
+        history.add(rma.issueLabel("label", "tracking", "label.pdf", at));
+        history.add(rma.markParcelInTransit(at));
+        history.add(rma.receive(at, "warehouse"));
+        history.add(rma.startInspection("inspector", at));
+        history.addAll(rma.completeInspection("inspector", at,
+                List.of(new InspectionResult("item", ItemGrade.A, null, List.of())), null,
+                new InspectionPolicy(new BigDecimal("500.00")),
+                new RefundPolicy(0, 15, 40, new BigDecimal("15.00"))));
+        while (history.size() < size) {
+            history.add(rma.failRefund(FailureCode.TIMEOUT, "timeout", 1, true, at));
+            if (history.size() < size) {
+                history.add(rma.retryRefund(at));
+            }
+        }
+        return history;
+    }
+
     private static RmaRequested requested(UUID rmaId) {
         Instant at = Instant.parse("2026-10-01T12:00:00Z");
         Currency currency = Currency.getInstance("PLN");
@@ -237,7 +304,7 @@ class PostgresEventStoreIT {
 
     @Configuration
     @EnableTransactionManagement
-    @Import({PostgresEventStore.class, EventJsonMapper.class, EventUpcasting.class})
+    @Import({PostgresEventStore.class, EventJsonMapper.class, EventUpcasting.class, RmaStateJsonMapper.class})
     static class TestConfig {
         @Bean
         DataSource dataSource() {

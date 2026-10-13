@@ -11,8 +11,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.postgresql.util.PSQLException;
 import org.springframework.stereotype.Repository;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -24,10 +26,19 @@ public class PostgresEventStore implements EventStore {
 
     private final JdbcTemplate jdbcTemplate;
     private final EventJsonMapper mapper;
+    private final RmaStateJsonMapper stateMapper;
+    private final int snapshotEveryNEvents;
 
-    public PostgresEventStore(JdbcTemplate jdbcTemplate, EventJsonMapper mapper) {
+    public PostgresEventStore(JdbcTemplate jdbcTemplate, EventJsonMapper mapper,
+            RmaStateJsonMapper stateMapper,
+            @Value("${returns.snapshot-every-n-events:50}") int snapshotEveryNEvents) {
         this.jdbcTemplate = jdbcTemplate;
         this.mapper = mapper;
+        this.stateMapper = stateMapper;
+        if (snapshotEveryNEvents < 1) {
+            throw new IllegalArgumentException("Snapshot interval must be positive");
+        }
+        this.snapshotEveryNEvents = snapshotEveryNEvents;
     }
 
     @Override
@@ -40,6 +51,9 @@ public class PostgresEventStore implements EventStore {
         }
         if (expectedVersion < 0) {
             throw new IllegalArgumentException("Expected version must not be negative");
+        }
+        if (expectedVersion > Integer.MAX_VALUE - (long) events.size()) {
+            throw new IllegalArgumentException("Event versions exceed the database INTEGER range");
         }
 
         for (DomainEvent event : events) {
@@ -75,6 +89,31 @@ public class PostgresEventStore implements EventStore {
                 throw exception;
             }
         }
+
+        if (expectedVersion / snapshotEveryNEvents < version / snapshotEveryNEvents) {
+            saveSnapshot(rmaId, version);
+        }
+    }
+
+    private void saveSnapshot(UUID rmaId, long version) {
+        List<DomainEvent> history = jdbcTemplate.query("""
+                SELECT type, schema_version, payload
+                FROM returns.rma_events
+                WHERE rma_id = ? AND version <= ?
+                ORDER BY version ASC
+                """,
+                (resultSet, rowNum) -> mapper.fromJson(resultSet.getString("type"),
+                        resultSet.getInt("schema_version"), resultSet.getString("payload")),
+                rmaId, version);
+        Rma rma = Rma.fromHistory(history);
+        if (rma.version() != version) {
+            throw new IllegalStateException("Event history is incomplete for RMA " + rmaId);
+        }
+        String state = stateMapper.toJson(rma.state());
+        jdbcTemplate.update("""
+                INSERT INTO returns.rma_snapshots (rma_id, version, state, created_at)
+                VALUES (?, ?, CAST(? AS jsonb), ?)
+                """, rmaId, (int) version, state, Timestamp.from(Instant.now()));
     }
 
     private boolean isVersionConflict(Throwable exception) {
