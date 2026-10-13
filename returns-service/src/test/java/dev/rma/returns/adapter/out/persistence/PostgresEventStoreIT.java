@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -18,6 +19,8 @@ import javax.sql.DataSource;
 
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -49,11 +52,14 @@ import dev.rma.returns.domain.InspectionResult;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.RequestedItem;
 import dev.rma.returns.domain.Rma;
+import dev.rma.returns.domain.enums.ClosureReason;
 import dev.rma.returns.domain.enums.FailureCode;
 import dev.rma.returns.domain.enums.ItemGrade;
 import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
 import dev.rma.returns.domain.events.DomainEvent;
+import dev.rma.returns.domain.events.InspectionCompleted;
+import dev.rma.returns.domain.events.RefundDecided;
 import dev.rma.returns.domain.events.RmaRequested;
 import dev.rma.returns.domain.policy.InspectionPolicy;
 import dev.rma.returns.domain.policy.RefundPolicy;
@@ -77,6 +83,128 @@ class PostgresEventStoreIT {
     EventJsonMapper mapper;
 
     @Test
+    void shouldCreateProjectionWithoutRefundAmount() {
+        UUID rmaId = UUID.randomUUID();
+        RmaRequested requested = requested(rmaId);
+
+        eventStore.append(rmaId, 0, List.of(requested));
+
+        var row = jdbcTemplate.queryForMap("SELECT * FROM returns.rma_projection WHERE rma_id = ?", rmaId);
+        assertThat(row.get("rma_id")).isEqualTo(rmaId);
+        assertThat(row.get("business_number")).isEqualTo(requested.businessNumber());
+        assertProjection(rmaId, RmaStatus.REQUESTED, null, requested.occurredAt());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"A, REFUND_PENDING, 85.00", "C, REFUND_PENDING, 45.00", "D, REJECTED, 0.00"})
+    void shouldProjectBothCompleteInspectionEvents(
+            ItemGrade grade, RmaStatus expectedStatus, BigDecimal expectedAmount) {
+        UUID rmaId = UUID.randomUUID();
+        List<DomainEvent> history = refundableHistory(rmaId, 7);
+        eventStore.append(rmaId, 0, history.subList(0, 5));
+        Rma rma = Rma.fromHistory(history.subList(0, 5));
+        Instant completedAt = history.getFirst().occurredAt().plusSeconds(600);
+        List<DomainEvent> completed = rma.completeInspection(
+                "inspector",
+                completedAt,
+                List.of(new InspectionResult("item", grade, grade == ItemGrade.D ? "Damaged" : null, List.of())),
+                null,
+                new InspectionPolicy(new BigDecimal("500.00")),
+                new RefundPolicy(0, 15, 40, new BigDecimal("15.00")));
+        assertThat(completed).hasSize(2);
+        assertThat(completed.getFirst()).isInstanceOf(InspectionCompleted.class);
+        assertThat(completed.getLast()).isInstanceOf(RefundDecided.class);
+
+        eventStore.append(rmaId, 5, completed);
+
+        assertProjection(rmaId, expectedStatus, expectedAmount, completedAt);
+        assertThat(eventStore.load(rmaId).orElseThrow().version()).isEqualTo(7);
+    }
+
+    @Test
+    void shouldOnlyUpdateTimestampForInspectionCompleted() {
+        UUID rmaId = UUID.randomUUID();
+        List<DomainEvent> history = refundableHistory(rmaId, 7);
+        eventStore.append(rmaId, 0, history.subList(0, 5));
+        InspectionCompleted completed = (InspectionCompleted) history.get(5);
+        Instant completedAt = completed.occurredAt().plusSeconds(300);
+
+        eventStore.append(
+                rmaId,
+                5,
+                List.of(new InspectionCompleted(
+                        rmaId, completed.inspectorId(), completedAt, completed.results(), completed.approvedBy())));
+
+        assertProjection(rmaId, RmaStatus.UNDER_INSPECTION, null, completedAt);
+    }
+
+    @Test
+    void shouldPreserveDecidedAmountThroughFailureRetryPayoutAndClosure() {
+        UUID rmaId = UUID.randomUUID();
+        List<DomainEvent> history = refundableHistory(rmaId, 7);
+        eventStore.append(rmaId, 0, history);
+        Rma rma = Rma.fromHistory(history);
+        Instant at = history.getFirst().occurredAt();
+        BigDecimal amount = new BigDecimal("85.00");
+        assertProjection(rmaId, RmaStatus.REFUND_PENDING, amount, at);
+
+        eventStore.append(
+                rmaId, 7, List.of(rma.failRefund(FailureCode.TIMEOUT, "timeout", 1, true, at.plusSeconds(1))));
+        assertProjection(rmaId, RmaStatus.REFUND_FAILED, amount, at.plusSeconds(1));
+        eventStore.append(rmaId, 8, List.of(rma.retryRefund(at.plusSeconds(2))));
+        assertProjection(rmaId, RmaStatus.REFUND_PENDING, amount, at.plusSeconds(2));
+        eventStore.append(
+                rmaId,
+                9,
+                List.of(rma.executeRefund(
+                        "payout", new Money(amount, Currency.getInstance("PLN")), 2, at.plusSeconds(3))));
+        assertProjection(rmaId, RmaStatus.REFUNDED, amount, at.plusSeconds(3));
+        eventStore.append(rmaId, 10, List.of(rma.close(ClosureReason.REFUND_COMPLETED, at.plusSeconds(4))));
+        assertProjection(rmaId, RmaStatus.CLOSED, amount, at.plusSeconds(4));
+    }
+
+    @Test
+    void shouldRollbackEventsAndEarlierProjectionUpdatesWhenProjectionUpdateFails() {
+        UUID rmaId = UUID.randomUUID();
+        RmaRequested requested = requested(rmaId);
+        eventStore.append(rmaId, 0, List.of(requested));
+        Rma rma = Rma.fromHistory(List.of(requested));
+        List<DomainEvent> events = List.of(
+                rma.issueLabel(
+                        "label", "tracking", "label.pdf", requested.occurredAt().plusSeconds(1)),
+                rma.schedulePickup(
+                        "pickup",
+                        LocalDate.of(2026, 10, 3),
+                        requested.occurredAt().plusSeconds(2)));
+        jdbcTemplate.execute("ALTER TABLE returns.rma_projection ADD CONSTRAINT test_reject_projection_pickup CHECK ("
+                + "rma_id <> '" + rmaId + "'::uuid OR status <> 'PICKUP_SCHEDULED')");
+        try {
+            assertThatThrownBy(() -> eventStore.append(rmaId, 1, events))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(jdbcTemplate.queryForList(
+                            "SELECT version FROM returns.rma_events WHERE rma_id = ? ORDER BY version",
+                            Integer.class,
+                            rmaId))
+                    .containsExactly(1);
+            assertProjection(rmaId, RmaStatus.REQUESTED, null, requested.occurredAt());
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE returns.rma_projection DROP CONSTRAINT test_reject_projection_pickup");
+        }
+    }
+
+    private void assertProjection(UUID rmaId, RmaStatus status, BigDecimal amount, Instant updatedAt) {
+        var row = jdbcTemplate.queryForMap(
+                "SELECT status, refund_amount, updated_at FROM returns.rma_projection WHERE rma_id = ?", rmaId);
+        assertThat(row.get("status")).isEqualTo(status.name());
+        if (amount == null) {
+            assertThat(row.get("refund_amount")).isNull();
+        } else {
+            assertThat((BigDecimal) row.get("refund_amount")).isEqualByComparingTo(amount);
+        }
+        assertThat(((Timestamp) row.get("updated_at")).toInstant()).isEqualTo(updatedAt);
+    }
+
+    @Test
     void shouldPersistThreeEventsAndRestoreRma() {
         UUID rmaId = UUID.randomUUID();
         RmaRequested requested = requested(rmaId);
@@ -92,6 +220,7 @@ class PostgresEventStoreIT {
 
         eventStore.append(rmaId, 0, events);
 
+        assertProjection(rmaId, RmaStatus.PICKUP_SCHEDULED, null, requestedAt.plusSeconds(120));
         Rma restored = eventStore.load(rmaId).orElseThrow();
         assertThat(restored.status()).isEqualTo(RmaStatus.PICKUP_SCHEDULED);
         assertThat(restored.version()).isEqualTo(3);
