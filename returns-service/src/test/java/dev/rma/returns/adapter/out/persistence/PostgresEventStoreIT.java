@@ -270,6 +270,71 @@ class PostgresEventStoreIT {
         }
     }
 
+    @Test
+    void shouldRestoreFromSnapshotWithoutReadingCoveredEvents() {
+        UUID rmaId = UUID.randomUUID();
+        List<DomainEvent> history = refundableHistory(rmaId, 50);
+        eventStore.append(rmaId, 0, history);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
+                .containsExactly(50);
+
+        makeCoveredEventsUnreadable(rmaId, 50);
+
+        Rma restored = eventStore.load(rmaId).orElseThrow();
+        assertThat(restored.version()).isEqualTo(50);
+        assertThat(restored.state()).isEqualTo(Rma.fromHistory(history).state());
+    }
+
+    @Test
+    void shouldRestoreSnapshotAndApplyOnlyLaterEvents() {
+        UUID rmaId = UUID.randomUUID();
+        List<DomainEvent> history = refundableHistory(rmaId, 53);
+        eventStore.append(rmaId, 0, history.subList(0, 50));
+        eventStore.append(rmaId, 50, history.subList(50, 53));
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rmaId))
+                .containsExactly(50);
+
+        makeCoveredEventsUnreadable(rmaId, 50);
+
+        Rma restored = eventStore.load(rmaId).orElseThrow();
+        assertThat(restored.version()).isEqualTo(53);
+        assertThat(restored.state()).isEqualTo(Rma.fromHistory(history).state());
+    }
+
+    @Test
+    void shouldChooseNewestSnapshotAndIgnoreOlderSnapshotAndHistory() {
+        UUID rmaId = UUID.randomUUID();
+        List<DomainEvent> history = refundableHistory(rmaId, 103);
+        eventStore.append(rmaId, 0, history.subList(0, 50));
+        eventStore.append(rmaId, 50, history.subList(50, 100));
+        eventStore.append(rmaId, 100, history.subList(100, 103));
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT version FROM returns.rma_snapshots WHERE rma_id = ? ORDER BY version",
+                Integer.class, rmaId)).containsExactly(50, 100);
+
+        // Tylko baza testowa: starszy snapshot nie może być użyty ani deserializowany.
+        assertThat(jdbcTemplate.update("""
+                UPDATE returns.rma_snapshots SET state = '{}'::jsonb
+                WHERE rma_id = ? AND version = 50
+                """, rmaId)).isEqualTo(1);
+        makeCoveredEventsUnreadable(rmaId, 100);
+
+        Rma restored = eventStore.load(rmaId).orElseThrow();
+        assertThat(restored.version()).isEqualTo(103);
+        assertThat(restored.state()).isEqualTo(Rma.fromHistory(history).state());
+    }
+
+    private void makeCoveredEventsUnreadable(UUID rmaId, int throughVersion) {
+        // Po utworzeniu snapshotu zmieniamy typ wyłącznie w izolowanej bazie testowej.
+        // W produkcji historia pozostaje append-only; test łączy się jako właściciel bazy.
+        assertThat(jdbcTemplate.update("""
+                UPDATE returns.rma_events SET type = 'UnreadableTestEvent'
+                WHERE rma_id = ? AND version <= ?
+                """, rmaId, throughVersion)).isEqualTo(throughVersion);
+    }
+
     private static List<DomainEvent> refundableHistory(UUID rmaId, int size) {
         RmaRequested requested = requested(rmaId);
         Instant at = requested.requestedAt();
