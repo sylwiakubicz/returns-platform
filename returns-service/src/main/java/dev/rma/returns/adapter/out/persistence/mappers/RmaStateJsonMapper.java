@@ -1,4 +1,4 @@
-package dev.rma.returns.adapter.out.persistence;
+package dev.rma.returns.adapter.out.persistence.mappers;
 
 import java.util.Objects;
 

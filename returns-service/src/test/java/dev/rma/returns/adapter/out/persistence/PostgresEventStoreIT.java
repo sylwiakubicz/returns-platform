@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 
 import javax.sql.DataSource;
 
+import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
+import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

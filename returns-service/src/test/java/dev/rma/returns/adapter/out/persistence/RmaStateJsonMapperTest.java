@@ -10,6 +10,7 @@ import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
 
+import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 

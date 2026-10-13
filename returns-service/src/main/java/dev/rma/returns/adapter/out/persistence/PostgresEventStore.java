@@ -8,6 +8,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Stream;
 
+import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
+import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import org.postgresql.util.PSQLException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;

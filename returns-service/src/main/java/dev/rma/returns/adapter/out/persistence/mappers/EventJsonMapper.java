@@ -1,7 +1,8 @@
-package dev.rma.returns.adapter.out.persistence;
+package dev.rma.returns.adapter.out.persistence.mappers;
 
 import java.util.Objects;
 
+import dev.rma.returns.adapter.out.persistence.EventUpcasting;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
