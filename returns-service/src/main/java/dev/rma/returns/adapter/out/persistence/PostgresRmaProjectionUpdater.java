@@ -26,41 +26,42 @@ public class PostgresRmaProjectionUpdater implements RmaProjectionUpdater {
         Objects.requireNonNull(event, "Event must not be null");
         Timestamp updatedAt = Timestamp.from(event.occurredAt());
 
-        int affectedRows = switch (event) {
-            case RmaRequested requested -> jdbcTemplate.update(
-                """
+        int affectedRows =
+                switch (event) {
+                    case RmaRequested requested -> jdbcTemplate.update(
+                            """
                     INSERT INTO returns.rma_projection
                         (rma_id, business_number, status, refund_amount, updated_at)
                     VALUES (?, ?, ?, NULL, ?)
                     """,
-                requested.rmaId(),
-                requested.businessNumber(),
-                RmaStatus.REQUESTED.name(),
-                updatedAt);
-            case RefundDecided decided -> jdbcTemplate.update(
-                """
+                            requested.rmaId(),
+                            requested.businessNumber(),
+                            RmaStatus.REQUESTED.name(),
+                            updatedAt);
+                    case RefundDecided decided -> jdbcTemplate.update(
+                            """
                     UPDATE returns.rma_projection
                     SET status = ?, refund_amount = ?, updated_at = ?
                     WHERE rma_id = ?
                     """,
-                statusAfter(decided).name(),
-                decided.refundAmount().amount(),
-                updatedAt,
-                event.rmaId());
-            case InspectionCompleted inspectionCompleted -> jdbcTemplate.update(
-                """
+                            statusAfter(decided).name(),
+                            decided.refundAmount().amount(),
+                            updatedAt,
+                            event.rmaId());
+                    case InspectionCompleted inspectionCompleted -> jdbcTemplate.update(
+                            """
                     UPDATE returns.rma_projection SET updated_at = ? WHERE rma_id = ?
                     """,
-                updatedAt,
-                event.rmaId());
-            default -> jdbcTemplate.update(
-                """
+                            updatedAt,
+                            event.rmaId());
+                    default -> jdbcTemplate.update(
+                            """
                     UPDATE returns.rma_projection SET status = ?, updated_at = ? WHERE rma_id = ?
                     """,
-                statusAfter(event).name(),
-                updatedAt,
-                event.rmaId());
-        };
+                            statusAfter(event).name(),
+                            updatedAt,
+                            event.rmaId());
+                };
 
         if (affectedRows != 1) {
             throw new IncorrectUpdateSemanticsDataAccessException(

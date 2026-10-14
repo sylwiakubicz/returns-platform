@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Currency;
 import java.util.List;
 import java.util.UUID;
@@ -43,11 +44,18 @@ import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import dev.rma.returns.application.RebuildRmaProjectionService;
 import dev.rma.returns.application.port.in.RebuildRmaProjectionUseCase;
 import dev.rma.returns.application.port.out.EventStore;
+import dev.rma.returns.domain.InspectionResult;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.RequestedItem;
 import dev.rma.returns.domain.Rma;
+import dev.rma.returns.domain.enums.ClosureReason;
+import dev.rma.returns.domain.enums.FailureCode;
+import dev.rma.returns.domain.enums.ItemGrade;
 import dev.rma.returns.domain.enums.RmaReason;
+import dev.rma.returns.domain.events.DomainEvent;
 import dev.rma.returns.domain.events.RmaRequested;
+import dev.rma.returns.domain.policy.InspectionPolicy;
+import dev.rma.returns.domain.policy.RefundPolicy;
 
 @Testcontainers
 @SpringJUnitConfig(RebuildRmaProjectionIT.TestConfig.class)
@@ -129,6 +137,96 @@ class RebuildRmaProjectionIT {
 
         assertThat(jdbcTemplate.queryForList("SELECT * FROM returns.rma_projection"))
                 .isEmpty();
+    }
+
+    @Test
+    void shouldRebuildIdenticalProjectionForReturnsInDifferentStates() {
+        RmaRequested requested = requested();
+        eventStore.append(requested.rmaId(), 0, List.of(requested));
+
+        RmaRequested labeled = requested();
+        eventStore.append(
+                labeled.rmaId(),
+                0,
+                List.of(
+                        labeled,
+                        Rma.fromHistory(List.of(labeled))
+                                .issueLabel(
+                                        "label",
+                                        "tracking",
+                                        "label.pdf",
+                                        labeled.occurredAt().plusSeconds(60))));
+
+        persistHistory(inspectionHistory(ItemGrade.A));
+        persistHistory(inspectionHistory(ItemGrade.C));
+        persistHistory(inspectionHistory(ItemGrade.D));
+
+        List<DomainEvent> failedHistory = inspectionHistory(ItemGrade.A);
+        Rma failed = Rma.fromHistory(failedHistory);
+        failedHistory.add(failed.failRefund(
+                FailureCode.TIMEOUT,
+                "timeout",
+                1,
+                true,
+                failedHistory.getLast().occurredAt().plusSeconds(60)));
+        persistHistory(failedHistory);
+
+        List<DomainEvent> closedHistory = inspectionHistory(ItemGrade.A);
+        Rma closed = Rma.fromHistory(closedHistory);
+        Instant paidAt = closedHistory.getLast().occurredAt().plusSeconds(60);
+        closedHistory.add(closed.executeRefund(
+                "payout", new Money(new BigDecimal("85.00"), Currency.getInstance("PLN")), 1, paidAt));
+        closedHistory.add(closed.close(ClosureReason.REFUND_COMPLETED, paidAt.plusSeconds(60)));
+        persistHistory(closedHistory);
+
+        String comparisonSql =
+                """
+                SELECT rma_id, business_number, status, refund_amount
+                FROM returns.rma_projection
+                ORDER BY rma_id
+                """;
+        var before = jdbcTemplate.queryForList(comparisonSql);
+        assertThat(before).hasSize(7);
+        assertThat(before)
+                .extracting(row -> row.get("status"))
+                .containsExactlyInAnyOrder(
+                        "REQUESTED",
+                        "LABEL_ISSUED",
+                        "REFUND_PENDING",
+                        "REFUND_PENDING",
+                        "REJECTED",
+                        "REFUND_FAILED",
+                        "CLOSED");
+
+        assertThat(jdbcTemplate.update("DELETE FROM returns.rma_projection")).isEqualTo(7);
+        assertThat(jdbcTemplate.queryForList(comparisonSql)).isEmpty();
+
+        rebuild.rebuild();
+
+        assertThat(jdbcTemplate.queryForList(comparisonSql)).containsExactlyElementsOf(before);
+    }
+
+    private void persistHistory(List<DomainEvent> history) {
+        eventStore.append(history.getFirst().rmaId(), 0, history);
+    }
+
+    private static List<DomainEvent> inspectionHistory(ItemGrade grade) {
+        RmaRequested requested = requested();
+        List<DomainEvent> history = new ArrayList<>(List.of(requested));
+        Rma rma = Rma.fromHistory(history);
+        Instant at = requested.occurredAt();
+        history.add(rma.issueLabel("label", "tracking", "label.pdf", at.plusSeconds(60)));
+        history.add(rma.markParcelInTransit(at.plusSeconds(120)));
+        history.add(rma.receive(at.plusSeconds(180), "warehouse"));
+        history.add(rma.startInspection("inspector", at.plusSeconds(240)));
+        history.addAll(rma.completeInspection(
+                "inspector",
+                at.plusSeconds(300),
+                List.of(new InspectionResult("item", grade, grade == ItemGrade.D ? "Damaged" : null, List.of())),
+                null,
+                new InspectionPolicy(new BigDecimal("500.00")),
+                new RefundPolicy(0, 15, 40, new BigDecimal("15.00"))));
+        return history;
     }
 
     @Test
