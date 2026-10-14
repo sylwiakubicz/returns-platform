@@ -2,16 +2,18 @@ package dev.rma.returns.adapter.out.persistence.mappers;
 
 import java.util.Objects;
 
-import dev.rma.returns.adapter.out.persistence.EventUpcasting;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import dev.rma.returns.adapter.out.persistence.EventUpcasting;
+import dev.rma.returns.application.port.out.StoredEvent;
+import dev.rma.returns.application.port.out.StoredEventDecoder;
 import dev.rma.returns.domain.events.*;
 
 @Component
-public class EventJsonMapper {
+public class EventJsonMapper implements StoredEventDecoder {
 
     private final ObjectMapper objectMapper;
     private final EventUpcasting upcasting;
@@ -28,6 +30,12 @@ public class EventJsonMapper {
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Cannot serialize event " + typeOf(event), exception);
         }
+    }
+
+    @Override
+    public DomainEvent decode(StoredEvent event) {
+        Objects.requireNonNull(event, "event must not be null");
+        return fromJson(event.type(), event.schemaVersion(), event.payload());
     }
 
     public DomainEvent fromJson(String type, int schemaVersion, String payload) {
