@@ -112,3 +112,5 @@ role-check: ## Show returns_app privileges (expected: t, t, f, f, f)
 		  has_table_privilege(current_user, 'returns.rma_events', 'UPDATE') AS can_update, \
 		  has_table_privilege(current_user, 'returns.rma_events', 'DELETE') AS can_delete, \
 		  has_schema_privilege(current_user, 'returns', 'CREATE') AS can_create;"
+
+# curl http://localhost:8080/actuator/health
