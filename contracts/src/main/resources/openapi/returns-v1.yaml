@@ -1,0 +1,1672 @@
+"openapi": "3.0.3"
+"info":
+  "title": "Returns API"
+  "version": "1.0.0"
+  "description": "Stage 3, step 6 contract. Public routes address returns by business number. Simulation routes are temporary; administration routes remain. Authentication is introduced in stage 4."
+"servers":
+  -
+    "url": "http://localhost:8080"
+    "description": "Local development"
+"security": []
+"tags":
+  -
+    "name": "Returns"
+    "description": "Customer return commands and queries."
+  -
+    "name": "Simulation"
+    "description": "Temporary integration simulations removed in project stage 6."
+  -
+    "name": "Administration"
+    "description": "Permanent operational endpoints."
+"paths":
+  "/api/v1/returns":
+    "post":
+      "operationId": "createReturn"
+      "summary": "Create a return"
+      "tags":
+        - "Returns"
+      "responses":
+        "201":
+          "description": "Return created. Replays return the same status, body and Location."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReturnView"
+          "headers":
+            "Location":
+              "description": "Relative URI of the created return, using its business number. Replayed unchanged."
+              "schema":
+                "type": "string"
+                "format": "uri-reference"
+                "example": "/api/v1/returns/RMA-2026-000001"
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "API is open until project stage 4. IDs and request time are assigned by the server. All item currencies must equal currency. Event append, projection update and idempotency response storage commit atomically. Idempotency is scoped to key plus endpoint; SHA-256 is calculated over the exact request body bytes. Changing whitespace also changes the hash. Concurrent identical requests create one return and replay its response. Failed transactions do not reserve keys. Records expire after 24 hours; reuse after expiry can create a new return."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CreateReturnRequest"
+      "parameters":
+        -
+          "name": "Idempotency-Key"
+          "in": "header"
+          "required": true
+          "description": "Client-generated key identifying a single creation attempt; retained for 24 hours."
+          "schema":
+            "type": "string"
+            "minLength": 1
+            "maxLength": 255
+    "get":
+      "operationId": "listReturns"
+      "summary": "List returns"
+      "tags":
+        - "Returns"
+      "responses":
+        "200":
+          "description": "Page from the projection."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReturnPage"
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "Zero-based pages. Stable order by business_number descending. Oversized pages are rejected with 400. Projection data can lag behind writes in future stages; each item exposes updatedAt."
+      "parameters":
+        -
+          "name": "page"
+          "in": "query"
+          "description": "Zero-based page index."
+          "schema":
+            "type": "integer"
+            "minimum": 0
+            "default": 0
+        -
+          "name": "size"
+          "in": "query"
+          "description": "Maximum 100 items; values above the limit are rejected."
+          "schema":
+            "type": "integer"
+            "minimum": 1
+            "maximum": 100
+            "default": 20
+        -
+          "name": "status"
+          "in": "query"
+          "description": "Optional exact state filter."
+          "schema":
+            "$ref": "#/components/schemas/RmaStatus"
+  "/api/v1/returns/{businessNumber}":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "get":
+      "operationId": "getReturn"
+      "summary": "Get a return"
+      "tags":
+        - "Returns"
+      "responses":
+        "200":
+          "description": "Current projection and its freshness timestamp."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReturnView"
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "500":
+          "$ref": "#/components/responses/Error500"
+  "/api/v1/returns/{businessNumber}/cancel":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "cancelReturn"
+      "summary": "Cancel a return"
+      "tags":
+        - "Returns"
+      "responses":
+        "204":
+          "description": "Cancellation recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "Allowed in REQUESTED, LABEL_ISSUED and PICKUP_SCHEDULED. Records RmaCancelled and leaves the return in CANCELLED; closure is a separate command. cancelledBy is supplied explicitly until authentication is introduced in stage 4. Cancellation time is server-assigned."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CancelReturnRequest"
+  "/api/v1/returns/{businessNumber}/history":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "get":
+      "operationId": "getReturnHistory"
+      "summary": "Get full return history"
+      "tags":
+        - "Returns"
+      "responses":
+        "200":
+          "description": "All events in ascending version order, including events preceding snapshots."
+          "content":
+            "application/json":
+              "schema":
+                "$ref": "#/components/schemas/ReturnHistory"
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "Reads the event store, not the projection or snapshots. Payloads are upcast to the current schema; schemaVersion describes the returned payload version. Event IDs, aggregate versions and occurrence times remain unchanged."
+  "/internal/sim/returns/{businessNumber}/label-issued":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "issueLabel"
+      "summary": "Simulate label-issued"
+      "tags":
+        - "Simulation"
+      "responses":
+        "204":
+          "description": "Simulated command and resulting events recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "REQUESTED → LABEL_ISSUED. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/IssueLabelRequest"
+      "deprecated": true
+  "/internal/sim/returns/{businessNumber}/pickup-scheduled":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "schedulePickup"
+      "summary": "Simulate pickup-scheduled"
+      "tags":
+        - "Simulation"
+      "responses":
+        "204":
+          "description": "Simulated command and resulting events recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "LABEL_ISSUED → PICKUP_SCHEDULED. Optional on the positive path. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/SchedulePickupRequest"
+      "deprecated": true
+  "/internal/sim/returns/{businessNumber}/parcel-in-transit":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "markParcelInTransit"
+      "summary": "Simulate parcel-in-transit"
+      "tags":
+        - "Simulation"
+      "responses":
+        "204":
+          "description": "Simulated command and resulting events recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "LABEL_ISSUED or PICKUP_SCHEDULED → IN_TRANSIT. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
+      "deprecated": true
+  "/internal/sim/returns/{businessNumber}/parcel-received":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "receiveParcel"
+      "summary": "Simulate parcel-received"
+      "tags":
+        - "Simulation"
+      "responses":
+        "204":
+          "description": "Simulated command and resulting events recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "IN_TRANSIT → RECEIVED. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ReceiveParcelRequest"
+      "deprecated": true
+  "/internal/sim/returns/{businessNumber}/inspection-started":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "startInspection"
+      "summary": "Simulate inspection-started"
+      "tags":
+        - "Simulation"
+      "responses":
+        "204":
+          "description": "Simulated command and resulting events recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "RECEIVED → UNDER_INSPECTION. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/StartInspectionRequest"
+      "deprecated": true
+  "/internal/sim/returns/{businessNumber}/inspection-completed":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "completeInspection"
+      "summary": "Simulate inspection-completed"
+      "tags":
+        - "Simulation"
+      "responses":
+        "204":
+          "description": "Simulated command and resulting events recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "Records InspectionCompleted and RefundDecided atomically. Results must cover every item exactly once. Supervisor approval is required for grade D above the configured threshold. UNDER_INSPECTION → REFUND_PENDING or REJECTED. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CompleteInspectionRequest"
+      "deprecated": true
+  "/internal/sim/returns/{businessNumber}/refund-executed":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "executeRefund"
+      "summary": "Simulate refund-executed"
+      "tags":
+        - "Simulation"
+      "responses":
+        "204":
+          "description": "Simulated command and resulting events recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "REFUND_PENDING → REFUNDED. Amount and currency must match the refund decision. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/ExecuteRefundRequest"
+      "deprecated": true
+  "/internal/sim/returns/{businessNumber}/close":
+    "parameters":
+      -
+        "$ref": "#/components/parameters/BusinessNumber"
+    "post":
+      "operationId": "closeReturn"
+      "summary": "Simulate close"
+      "tags":
+        - "Simulation"
+      "responses":
+        "204":
+          "description": "Simulated command and resulting events recorded."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "404":
+          "$ref": "#/components/responses/Error404"
+        "409":
+          "$ref": "#/components/responses/Error409"
+        "422":
+          "$ref": "#/components/responses/Error422"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "Records RmaClosed. Closure reason must match the terminal state; REFUNDED uses REFUND_COMPLETED. → CLOSED. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
+      "requestBody":
+        "required": true
+        "content":
+          "application/json":
+            "schema":
+              "$ref": "#/components/schemas/CloseReturnRequest"
+      "deprecated": true
+  "/admin/projections/rebuild":
+    "post":
+      "operationId": "rebuildProjections"
+      "summary": "Rebuild return projections"
+      "tags":
+        - "Administration"
+      "responses":
+        "204":
+          "description": "Projection rebuild completed."
+        "400":
+          "$ref": "#/components/responses/Error400"
+        "500":
+          "$ref": "#/components/responses/Error500"
+      "description": "Permanent administrative endpoint. Synchronously rebuilds the projection from the complete event store. Open in stage 3; supervisor authorization is introduced in project stage 4."
+"components":
+  "parameters":
+    "BusinessNumber":
+      "name": "businessNumber"
+      "in": "path"
+      "required": true
+      "description": "Immutable business number, never the aggregate UUID."
+      "schema":
+        "$ref": "#/components/schemas/BusinessNumber"
+  "responses":
+    "Error400":
+      "description": "Malformed request, invalid field, missing Idempotency-Key, invalid business number, page size or filter. Validation failures include errors with field and message."
+      "content":
+        "application/problem+json":
+          "schema":
+            "$ref": "#/components/schemas/ProblemDetail"
+    "Error404":
+      "description": "No return exists with this business number."
+      "content":
+        "application/problem+json":
+          "schema":
+            "$ref": "#/components/schemas/ProblemDetail"
+    "Error409":
+      "description": "Concurrency conflict or a command forbidden in the current state."
+      "content":
+        "application/problem+json":
+          "schema":
+            "$ref": "#/components/schemas/ProblemDetail"
+    "Error422":
+      "description": "Domain rules reject the request, or an Idempotency-Key is reused with a different request body."
+      "content":
+        "application/problem+json":
+          "schema":
+            "$ref": "#/components/schemas/ProblemDetail"
+    "Error500":
+      "description": "Unexpected server error; internal details are not exposed."
+      "content":
+        "application/problem+json":
+          "schema":
+            "$ref": "#/components/schemas/ProblemDetail"
+  "schemas":
+    "RmaStatus":
+      "type": "string"
+      "enum":
+        - "REQUESTED"
+        - "LABEL_ISSUED"
+        - "PICKUP_SCHEDULED"
+        - "IN_TRANSIT"
+        - "RECEIVED"
+        - "UNDER_INSPECTION"
+        - "REFUND_PENDING"
+        - "REFUND_FAILED"
+        - "REFUNDED"
+        - "REJECTED"
+        - "EXPIRED"
+        - "LOST"
+        - "CANCELLED"
+        - "CLOSED"
+    "RmaReason":
+      "type": "string"
+      "enum":
+        - "CHANGED_MIND"
+        - "WRONG_ITEM"
+        - "DAMAGED_IN_TRANSIT"
+        - "DEFECTIVE"
+        - "NOT_AS_DESCRIBED"
+    "ItemGrade":
+      "type": "string"
+      "enum":
+        - "A"
+        - "B"
+        - "C"
+        - "D"
+    "RefundDecision":
+      "type": "string"
+      "enum":
+        - "FULL"
+        - "PARTIAL"
+        - "REJECTED"
+    "FailureCode":
+      "type": "string"
+      "enum":
+        - "TIMEOUT"
+        - "PROVIDER_UNAVAILABLE"
+        - "RATE_LIMITED"
+        - "INSUFFICIENT_FUNDS"
+        - "INVALID_ACCOUNT"
+        - "REJECTED_BY_PROVIDER"
+    "ClosureReason":
+      "type": "string"
+      "enum":
+        - "REFUND_COMPLETED"
+        - "REJECTED_AFTER_INSPECTION"
+        - "EXPIRED_NO_SHIPMENT"
+        - "PARCEL_LOST"
+        - "CANCELLED_BY_CUSTOMER"
+        - "CLOSED_BY_OPERATOR"
+    "BusinessNumber":
+      "type": "string"
+      "pattern": "^RMA-[0-9]{4}-[0-9]{6}$"
+      "example": "RMA-2026-000001"
+    "Currency":
+      "type": "string"
+      "pattern": "^[A-Z]{3}$"
+      "description": "ISO 4217 currency code."
+      "example": "PLN"
+    "Money":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "amount"
+        - "currency"
+      "properties":
+        "amount":
+          "type": "string"
+          "pattern": "^[0-9]+\\.[0-9]{2}$"
+          "example": "100.00"
+          "description": "Exact decimal amount; serialized as a string to preserve monetary precision."
+        "currency":
+          "$ref": "#/components/schemas/Currency"
+    "RequestedItem":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "itemId"
+        - "sku"
+        - "name"
+        - "quantity"
+        - "unitPrice"
+      "properties":
+        "itemId":
+          "type": "string"
+          "minLength": 1
+        "sku":
+          "type": "string"
+          "minLength": 1
+        "name":
+          "type": "string"
+          "minLength": 1
+        "quantity":
+          "type": "integer"
+          "minimum": 1
+        "unitPrice":
+          "$ref": "#/components/schemas/Money"
+    "InspectionResult":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "itemId"
+        - "grade"
+      "properties":
+        "itemId":
+          "type": "string"
+          "minLength": 1
+        "grade":
+          "$ref": "#/components/schemas/ItemGrade"
+        "note":
+          "type": "string"
+          "maxLength": 500
+          "nullable": true
+        "photoKeys":
+          "type": "array"
+          "items":
+            "type": "string"
+            "minLength": 1
+    "ItemRefundDecision":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "itemId"
+        - "grade"
+        - "deductionPercent"
+        - "refundableAmount"
+      "properties":
+        "itemId":
+          "type": "string"
+          "minLength": 1
+        "grade":
+          "$ref": "#/components/schemas/ItemGrade"
+        "deductionPercent":
+          "type": "integer"
+          "minimum": 0
+          "maximum": 100
+        "refundableAmount":
+          "$ref": "#/components/schemas/Money"
+    "CreateReturnRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "orderId"
+        - "customerId"
+        - "orderDeliveredAt"
+        - "reason"
+        - "currency"
+        - "items"
+      "properties":
+        "orderId":
+          "type": "string"
+          "minLength": 1
+        "customerId":
+          "type": "string"
+          "minLength": 1
+        "orderDeliveredAt":
+          "type": "string"
+          "format": "date-time"
+        "reason":
+          "$ref": "#/components/schemas/RmaReason"
+        "customerNote":
+          "type": "string"
+          "maxLength": 1000
+          "nullable": true
+        "currency":
+          "$ref": "#/components/schemas/Currency"
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/RequestedItem"
+          "minItems": 1
+    "ReturnView":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "businessNumber"
+        - "status"
+        - "refundAmount"
+        - "updatedAt"
+      "properties":
+        "businessNumber":
+          "$ref": "#/components/schemas/BusinessNumber"
+        "status":
+          "$ref": "#/components/schemas/RmaStatus"
+        "refundAmount":
+          "type": "object"
+          "additionalProperties": false
+          "required":
+            - "amount"
+            - "currency"
+          "properties":
+            "amount":
+              "type": "string"
+              "pattern": "^[0-9]+\\.[0-9]{2}$"
+              "example": "100.00"
+              "description": "Exact decimal amount; serialized as a string to preserve monetary precision."
+            "currency":
+              "$ref": "#/components/schemas/Currency"
+          "nullable": true
+          "description": "Null until a refund decision exists."
+        "updatedAt":
+          "type": "string"
+          "format": "date-time"
+          "description": "Time of the latest event applied to this projection, not the HTTP response time."
+    "ReturnPage":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "content"
+        - "page"
+        - "size"
+        - "totalElements"
+        - "totalPages"
+      "properties":
+        "content":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/ReturnView"
+        "page":
+          "type": "integer"
+          "minimum": 0
+        "size":
+          "type": "integer"
+          "minimum": 1
+          "maximum": 100
+        "totalElements":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 0
+        "totalPages":
+          "type": "integer"
+          "minimum": 0
+    "CancelReturnRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "cancelledBy"
+      "properties":
+        "cancelledBy":
+          "type": "string"
+          "minLength": 1
+        "reason":
+          "type": "string"
+          "nullable": true
+    "ProblemDetail":
+      "type": "object"
+      "description": "RFC 9457 error. No stack traces or internal exception details are exposed. Extensions are permitted."
+      "required":
+        - "type"
+        - "title"
+        - "status"
+        - "detail"
+        - "instance"
+        - "code"
+      "properties":
+        "type":
+          "type": "string"
+          "format": "uri-reference"
+          "description": "Documentation URI for this error, for example /docs/errors/CONCURRENCY_CONFLICT; never about:blank."
+        "title":
+          "type": "string"
+        "status":
+          "type": "integer"
+          "minimum": 400
+          "maximum": 599
+        "detail":
+          "type": "string"
+        "instance":
+          "type": "string"
+          "format": "uri-reference"
+        "code":
+          "type": "string"
+        "errors":
+          "type": "array"
+          "items":
+            "type": "object"
+            "additionalProperties": false
+            "required":
+              - "field"
+              - "message"
+            "properties":
+              "field":
+                "type": "string"
+                "minLength": 1
+              "message":
+                "type": "string"
+                "minLength": 1
+    "InspectionCompletedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "inspectorId"
+        - "completedAt"
+        - "results"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "inspectorId":
+          "type": "string"
+        "completedAt":
+          "type": "string"
+          "format": "date-time"
+        "results":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/InspectionResult"
+        "approvedBy":
+          "type": "string"
+          "nullable": true
+    "InspectionStartedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "inspectorId"
+        - "startedAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "inspectorId":
+          "type": "string"
+        "startedAt":
+          "type": "string"
+          "format": "date-time"
+    "LabelIssuedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "labelId"
+        - "trackingNumber"
+        - "labelFileKey"
+        - "issuedAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "labelId":
+          "type": "string"
+        "trackingNumber":
+          "type": "string"
+        "labelFileKey":
+          "type": "string"
+        "issuedAt":
+          "type": "string"
+          "format": "date-time"
+    "ParcelInTransitPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "collectedAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "collectedAt":
+          "type": "string"
+          "format": "date-time"
+    "ParcelReceivedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "receivedAt"
+        - "warehouseId"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "receivedAt":
+          "type": "string"
+          "format": "date-time"
+        "warehouseId":
+          "type": "string"
+    "PickupScheduledPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "pickupId"
+        - "scheduledFor"
+        - "occurredAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "pickupId":
+          "type": "string"
+        "scheduledFor":
+          "type": "string"
+          "format": "date"
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+    "RefundDecidedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "decision"
+        - "refundAmount"
+        - "deductionTotal"
+        - "itemDecisions"
+        - "decidedAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "decision":
+          "$ref": "#/components/schemas/RefundDecision"
+        "refundAmount":
+          "$ref": "#/components/schemas/Money"
+        "deductionTotal":
+          "$ref": "#/components/schemas/Money"
+        "itemDecisions":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/ItemRefundDecision"
+        "rejectionReason":
+          "type": "string"
+          "nullable": true
+        "decidedAt":
+          "type": "string"
+          "format": "date-time"
+    "RefundExecutedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "payoutId"
+        - "amount"
+        - "attempt"
+        - "executedAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "payoutId":
+          "type": "string"
+        "amount":
+          "$ref": "#/components/schemas/Money"
+        "attempt":
+          "type": "integer"
+        "executedAt":
+          "type": "string"
+          "format": "date-time"
+    "RefundFailedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "failureCode"
+        - "failureMessage"
+        - "attempt"
+        - "retryable"
+        - "failedAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "failureCode":
+          "$ref": "#/components/schemas/FailureCode"
+        "failureMessage":
+          "type": "string"
+        "attempt":
+          "type": "integer"
+        "retryable":
+          "type": "boolean"
+        "failedAt":
+          "type": "string"
+          "format": "date-time"
+    "RmaCancelledPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "cancelledBy"
+        - "cancelledAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "cancelledBy":
+          "type": "string"
+        "cancelledAt":
+          "type": "string"
+          "format": "date-time"
+        "reason":
+          "type": "string"
+          "nullable": true
+    "RmaClosedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "closureReason"
+        - "closedAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "closureReason":
+          "$ref": "#/components/schemas/ClosureReason"
+        "closedAt":
+          "type": "string"
+          "format": "date-time"
+    "RmaExpiredPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "expiredAt"
+        - "daysSinceRequest"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "expiredAt":
+          "type": "string"
+          "format": "date-time"
+        "daysSinceRequest":
+          "type": "integer"
+    "RmaLostPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "lastKnownStatus"
+        - "declaredLostAt"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "lastKnownStatus":
+          "type": "string"
+        "declaredLostAt":
+          "type": "string"
+          "format": "date-time"
+    "RmaRequestedPayload":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "rmaId"
+        - "businessNumber"
+        - "orderId"
+        - "customerId"
+        - "orderDeliveredAt"
+        - "requestedAt"
+        - "reason"
+        - "currency"
+        - "items"
+      "properties":
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "businessNumber":
+          "type": "string"
+        "orderId":
+          "type": "string"
+        "customerId":
+          "type": "string"
+        "orderDeliveredAt":
+          "type": "string"
+          "format": "date-time"
+        "requestedAt":
+          "type": "string"
+          "format": "date-time"
+        "reason":
+          "$ref": "#/components/schemas/RmaReason"
+        "customerNote":
+          "type": "string"
+          "nullable": true
+        "currency":
+          "$ref": "#/components/schemas/Currency"
+        "items":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/RequestedItem"
+    "HistoryEvent":
+      "oneOf":
+        -
+          "$ref": "#/components/schemas/InspectionCompletedHistoryEvent"
+        -
+          "$ref": "#/components/schemas/InspectionStartedHistoryEvent"
+        -
+          "$ref": "#/components/schemas/LabelIssuedHistoryEvent"
+        -
+          "$ref": "#/components/schemas/ParcelInTransitHistoryEvent"
+        -
+          "$ref": "#/components/schemas/ParcelReceivedHistoryEvent"
+        -
+          "$ref": "#/components/schemas/PickupScheduledHistoryEvent"
+        -
+          "$ref": "#/components/schemas/RefundDecidedHistoryEvent"
+        -
+          "$ref": "#/components/schemas/RefundExecutedHistoryEvent"
+        -
+          "$ref": "#/components/schemas/RefundFailedHistoryEvent"
+        -
+          "$ref": "#/components/schemas/RmaCancelledHistoryEvent"
+        -
+          "$ref": "#/components/schemas/RmaClosedHistoryEvent"
+        -
+          "$ref": "#/components/schemas/RmaExpiredHistoryEvent"
+        -
+          "$ref": "#/components/schemas/RmaLostHistoryEvent"
+        -
+          "$ref": "#/components/schemas/RmaRequestedHistoryEvent"
+      "discriminator":
+        "propertyName": "type"
+        "mapping":
+          "InspectionCompleted": "#/components/schemas/InspectionCompletedHistoryEvent"
+          "InspectionStarted": "#/components/schemas/InspectionStartedHistoryEvent"
+          "LabelIssued": "#/components/schemas/LabelIssuedHistoryEvent"
+          "ParcelInTransit": "#/components/schemas/ParcelInTransitHistoryEvent"
+          "ParcelReceived": "#/components/schemas/ParcelReceivedHistoryEvent"
+          "PickupScheduled": "#/components/schemas/PickupScheduledHistoryEvent"
+          "RefundDecided": "#/components/schemas/RefundDecidedHistoryEvent"
+          "RefundExecuted": "#/components/schemas/RefundExecutedHistoryEvent"
+          "RefundFailed": "#/components/schemas/RefundFailedHistoryEvent"
+          "RmaCancelled": "#/components/schemas/RmaCancelledHistoryEvent"
+          "RmaClosed": "#/components/schemas/RmaClosedHistoryEvent"
+          "RmaExpired": "#/components/schemas/RmaExpiredHistoryEvent"
+          "RmaLost": "#/components/schemas/RmaLostHistoryEvent"
+          "RmaRequested": "#/components/schemas/RmaRequestedHistoryEvent"
+    "InspectionCompletedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "InspectionCompleted"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/InspectionCompletedPayload"
+    "InspectionStartedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "InspectionStarted"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/InspectionStartedPayload"
+    "LabelIssuedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "LabelIssued"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/LabelIssuedPayload"
+    "ParcelInTransitHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "ParcelInTransit"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/ParcelInTransitPayload"
+    "ParcelReceivedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "ParcelReceived"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/ParcelReceivedPayload"
+    "PickupScheduledHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "PickupScheduled"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/PickupScheduledPayload"
+    "RefundDecidedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "RefundDecided"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/RefundDecidedPayload"
+    "RefundExecutedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "RefundExecuted"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/RefundExecutedPayload"
+    "RefundFailedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "RefundFailed"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/RefundFailedPayload"
+    "RmaCancelledHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "RmaCancelled"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/RmaCancelledPayload"
+    "RmaClosedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "RmaClosed"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/RmaClosedPayload"
+    "RmaExpiredHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "RmaExpired"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/RmaExpiredPayload"
+    "RmaLostHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "RmaLost"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/RmaLostPayload"
+    "RmaRequestedHistoryEvent":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "eventId"
+        - "rmaId"
+        - "version"
+        - "type"
+        - "schemaVersion"
+        - "occurredAt"
+        - "payload"
+      "properties":
+        "eventId":
+          "type": "string"
+          "format": "uuid"
+        "rmaId":
+          "type": "string"
+          "format": "uuid"
+        "version":
+          "type": "integer"
+          "format": "int64"
+          "minimum": 1
+        "type":
+          "type": "string"
+          "enum":
+            - "RmaRequested"
+        "schemaVersion":
+          "type": "integer"
+          "minimum": 1
+        "occurredAt":
+          "type": "string"
+          "format": "date-time"
+        "payload":
+          "$ref": "#/components/schemas/RmaRequestedPayload"
+    "ReturnHistory":
+      "type": "array"
+      "items":
+        "$ref": "#/components/schemas/HistoryEvent"
+      "minItems": 1
+    "IssueLabelRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "labelId"
+        - "trackingNumber"
+        - "labelFileKey"
+      "properties":
+        "labelId":
+          "type": "string"
+          "minLength": 1
+        "trackingNumber":
+          "type": "string"
+          "minLength": 1
+        "labelFileKey":
+          "type": "string"
+          "minLength": 1
+    "SchedulePickupRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "pickupId"
+        - "scheduledFor"
+      "properties":
+        "pickupId":
+          "type": "string"
+          "minLength": 1
+        "scheduledFor":
+          "type": "string"
+          "format": "date"
+    "ReceiveParcelRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "warehouseId"
+      "properties":
+        "warehouseId":
+          "type": "string"
+          "minLength": 1
+    "StartInspectionRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "inspectorId"
+      "properties":
+        "inspectorId":
+          "type": "string"
+          "minLength": 1
+    "CompleteInspectionRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "inspectorId"
+        - "results"
+      "properties":
+        "inspectorId":
+          "type": "string"
+          "minLength": 1
+        "results":
+          "type": "array"
+          "items":
+            "$ref": "#/components/schemas/InspectionResult"
+          "minItems": 1
+        "approvedBy":
+          "type": "string"
+          "nullable": true
+    "ExecuteRefundRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "payoutId"
+        - "amount"
+        - "attempt"
+      "properties":
+        "payoutId":
+          "type": "string"
+          "minLength": 1
+        "amount":
+          "$ref": "#/components/schemas/Money"
+        "attempt":
+          "type": "integer"
+          "minimum": 1
+    "CloseReturnRequest":
+      "type": "object"
+      "additionalProperties": false
+      "required":
+        - "closureReason"
+      "properties":
+        "closureReason":
+          "$ref": "#/components/schemas/ClosureReason"

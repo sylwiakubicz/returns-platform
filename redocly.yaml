@@ -1,0 +1,10 @@
+apis:
+  returns@v1:
+    root: contracts/src/main/resources/openapi/returns-v1.yaml
+extends:
+  - recommended-strict
+rules:
+  # This internal learning project has no declared distribution license.
+  info-license: off
+  # Only a local server exists at this project stage.
+  no-server-example.com: off

@@ -12,6 +12,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  openapi-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Lint OpenAPI contracts
+        run: npx --yes @redocly/cli@2.63.0 lint --config redocly.yaml
+
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
