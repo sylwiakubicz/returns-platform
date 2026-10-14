@@ -75,6 +75,8 @@ public class PostgresEventStore implements EventStore {
             }
         }
 
+        RmaProjectionLock.forAppend(jdbcTemplate);
+
         String sql =
                 """
                 INSERT INTO returns.rma_events
