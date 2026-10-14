@@ -1,0 +1,296 @@
+package dev.rma.returns.adapter.out.persistence;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.Currency;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import javax.sql.DataSource;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
+import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
+import dev.rma.returns.application.RebuildRmaProjectionService;
+import dev.rma.returns.application.port.in.RebuildRmaProjectionUseCase;
+import dev.rma.returns.application.port.out.EventStore;
+import dev.rma.returns.domain.Money;
+import dev.rma.returns.domain.RequestedItem;
+import dev.rma.returns.domain.Rma;
+import dev.rma.returns.domain.enums.RmaReason;
+import dev.rma.returns.domain.events.RmaRequested;
+
+@Testcontainers
+@SpringJUnitConfig(RebuildRmaProjectionIT.TestConfig.class)
+class RebuildRmaProjectionIT {
+    @Container
+    static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+
+    @Autowired
+    RebuildRmaProjectionUseCase rebuild;
+
+    @Autowired
+    EventStore eventStore;
+
+    @Autowired
+    JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    @Qualifier("adminJdbcTemplate")
+    JdbcTemplate admin;
+
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
+    @BeforeEach
+    void clearTestDatabase() {
+        admin.update("DELETE FROM returns.rma_snapshots");
+        admin.update("DELETE FROM returns.rma_events");
+        admin.update("DELETE FROM returns.rma_projection");
+    }
+
+    @Test
+    void shouldRebuildMissingProjectionAsReturnsAppWithoutChangingHistory() {
+        RmaRequested requested = requested();
+        var label = Rma.fromHistory(List.of(requested))
+                .issueLabel(
+                        "label", "tracking", "label.pdf", requested.occurredAt().plusSeconds(60));
+        eventStore.append(requested.rmaId(), 0, List.of(requested, label));
+        jdbcTemplate.update("DELETE FROM returns.rma_projection");
+
+        rebuild.rebuild();
+
+        assertThat(jdbcTemplate.queryForObject("SELECT current_user", String.class))
+                .isEqualTo("returns_app");
+        var row = jdbcTemplate.queryForMap("SELECT * FROM returns.rma_projection");
+        assertThat(row.get("rma_id")).isEqualTo(requested.rmaId());
+        assertThat(row.get("business_number")).isEqualTo(requested.businessNumber());
+        assertThat(row.get("status")).isEqualTo("LABEL_ISSUED");
+        assertThat(row.get("refund_amount")).isNull();
+        assertThat(((java.sql.Timestamp) row.get("updated_at")).toInstant()).isEqualTo(label.occurredAt());
+        assertThat(eventStore.load(requested.rmaId()).orElseThrow().version()).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject(
+                        "SELECT has_table_privilege(current_user, 'returns.rma_events', 'DELETE')", Boolean.class))
+                .isFalse();
+    }
+
+    @Test
+    void shouldRestorePreviousProjectionWhenReplayFails() {
+        RmaRequested requested = requested();
+        var label = Rma.fromHistory(List.of(requested))
+                .issueLabel(
+                        "label", "tracking", "label.pdf", requested.occurredAt().plusSeconds(60));
+        eventStore.append(requested.rmaId(), 0, List.of(requested, label));
+        var before = jdbcTemplate.queryForList("SELECT * FROM returns.rma_projection");
+        admin.update("UPDATE returns.rma_events SET type = 'UnknownTestEvent' WHERE version = 2");
+
+        assertThatThrownBy(() -> rebuild.rebuild()).isInstanceOf(IllegalArgumentException.class);
+
+        assertThat(jdbcTemplate.queryForList("SELECT * FROM returns.rma_projection"))
+                .isEqualTo(before);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void shouldRebuildEmptyHistory() {
+        rebuild.rebuild();
+
+        assertThat(jdbcTemplate.queryForList("SELECT * FROM returns.rma_projection"))
+                .isEmpty();
+    }
+
+    @Test
+    void shouldBlockAppendUntilRebuildCommitsAndThenKeepItsChanges() throws Exception {
+        RmaRequested requested = requested();
+        eventStore.append(requested.rmaId(), 0, List.of(requested));
+        var label = Rma.fromHistory(List.of(requested))
+                .issueLabel(
+                        "label", "tracking", "label.pdf", requested.occurredAt().plusSeconds(60));
+        CountDownLatch rebuilt = new CountDownLatch(1);
+        CountDownLatch commit = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var rebuilding =
+                    executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        rebuild.rebuild();
+                        rebuilt.countDown();
+                        await(commit);
+                    }));
+            try {
+                assertThat(rebuilt.await(10, TimeUnit.SECONDS)).isTrue();
+                var writing = executor.submit(() -> eventStore.append(requested.rmaId(), 1, List.of(label)));
+                awaitBlockedLock("ShareLock");
+                assertThat(writing.isDone()).isFalse();
+                commit.countDown();
+                rebuilding.get(10, TimeUnit.SECONDS);
+                writing.get(10, TimeUnit.SECONDS);
+            } finally {
+                commit.countDown();
+            }
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM returns.rma_projection", String.class))
+                .isEqualTo("LABEL_ISSUED");
+        assertThat(eventStore.load(requested.rmaId()).orElseThrow().version()).isEqualTo(2);
+    }
+
+    @Test
+    void shouldWaitForInFlightAppendAndIncludeItsCommittedEvents() throws Exception {
+        RmaRequested requested = requested();
+        CountDownLatch appended = new CountDownLatch(1);
+        CountDownLatch commit = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var writing =
+                    executor.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                        eventStore.append(requested.rmaId(), 0, List.of(requested));
+                        appended.countDown();
+                        await(commit);
+                    }));
+            try {
+                assertThat(appended.await(10, TimeUnit.SECONDS)).isTrue();
+                var rebuilding = executor.submit(() -> rebuild.rebuild());
+                awaitBlockedLock("ExclusiveLock");
+                assertThat(rebuilding.isDone()).isFalse();
+                commit.countDown();
+                writing.get(10, TimeUnit.SECONDS);
+                rebuilding.get(10, TimeUnit.SECONDS);
+            } finally {
+                commit.countDown();
+            }
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT rma_id FROM returns.rma_projection", UUID.class))
+                .isEqualTo(requested.rmaId());
+    }
+
+    private void awaitBlockedLock(String mode) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Boolean waiting = admin.queryForObject(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM pg_locks
+                        WHERE locktype = 'advisory' AND classid = 1380794624 AND objid = 1
+                            AND mode = ? AND NOT granted
+                    )
+                    """,
+                    Boolean.class,
+                    mode);
+            if (Boolean.TRUE.equals(waiting)) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("Expected blocked " + mode + " for projection rebuild");
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out waiting for commit");
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private static RmaRequested requested() {
+        UUID id = UUID.randomUUID();
+        Instant at = Instant.parse("2026-10-01T12:00:00Z");
+        Currency currency = Currency.getInstance("PLN");
+        return Rma.request(
+                id,
+                "RMA-2026-" + id,
+                "order",
+                "customer",
+                at.minusSeconds(86400),
+                RmaReason.CHANGED_MIND,
+                null,
+                List.of(new RequestedItem("item", "sku", "Book", 1, new Money(new BigDecimal("100.00"), currency))),
+                currency,
+                at,
+                14);
+    }
+
+    @Configuration
+    @EnableTransactionManagement
+    @Import({
+        PostgresEventStore.class,
+        PostgresRmaProjectionUpdater.class,
+        PostgresRmaProjectionResetter.class,
+        RebuildRmaProjectionService.class,
+        EventJsonMapper.class,
+        EventUpcasting.class,
+        RmaStateJsonMapper.class
+    })
+    static class TestConfig {
+        @Bean
+        JdbcTemplate adminJdbcTemplate() {
+            DataSource dataSource =
+                    new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+            JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+            jdbc.execute("CREATE ROLE returns_app LOGIN PASSWORD 'test-password'");
+            jdbc.execute("CREATE SCHEMA returns");
+            jdbc.execute("GRANT USAGE ON SCHEMA returns TO returns_app");
+            // Odtwarzamy uprawnienia tabel nadawane przez infrastrukturę.
+            jdbc.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA returns "
+                    + "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO returns_app");
+            new ResourceDatabasePopulator(
+                            new ClassPathResource("db/migration/V1__create_returns_schema.sql"),
+                            new ClassPathResource("db/migration/V2__allow_null_refund_amount_in_rma_projection.sql"))
+                    .execute(dataSource);
+            return jdbc;
+        }
+
+        @Bean
+        DataSource dataSource(@Qualifier("adminJdbcTemplate") JdbcTemplate initializedAdmin) {
+            return new DriverManagerDataSource(POSTGRES.getJdbcUrl(), "returns_app", "test-password");
+        }
+
+        @Bean
+        @Primary
+        JdbcTemplate jdbcTemplate(DataSource dataSource) {
+            return new JdbcTemplate(dataSource);
+        }
+
+        @Bean
+        DataSourceTransactionManager transactionManager(DataSource dataSource) {
+            return new DataSourceTransactionManager(dataSource);
+        }
+
+        @Bean
+        ObjectMapper objectMapper() {
+            return Jackson2ObjectMapperBuilder.json().build();
+        }
+    }
+}
