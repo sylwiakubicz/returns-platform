@@ -10,19 +10,25 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Currency;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
+import dev.rma.returns.application.exception.ConcurrencyConflictException;
+import dev.rma.returns.application.exception.ReturnNotFoundException;
 import dev.rma.returns.application.model.CreateReturnCommand;
 import dev.rma.returns.application.model.ReturnView;
 import dev.rma.returns.application.port.out.BusinessNumberGenerator;
 import dev.rma.returns.application.port.out.EventStore;
+import dev.rma.returns.application.port.out.RmaIdLookup;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.RequestedItem;
+import dev.rma.returns.domain.Rma;
 import dev.rma.returns.domain.enums.RmaErrorCode;
 import dev.rma.returns.domain.enums.RmaReason;
 import dev.rma.returns.domain.enums.RmaStatus;
+import dev.rma.returns.domain.events.RmaCancelled;
 import dev.rma.returns.domain.events.RmaRequested;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
@@ -33,11 +39,13 @@ class ReturnCommandServiceTest {
     private static final Currency PLN = Currency.getInstance("PLN");
 
     private final EventStore eventStore = mock(EventStore.class);
+    private final RmaIdLookup lookup = mock(RmaIdLookup.class);
+
     private final BusinessNumberGenerator numbers = mock(BusinessNumberGenerator.class);
 
     private ReturnCommandService service(int windowDays) {
         return new ReturnCommandService(
-                eventStore, () -> RMA_ID, numbers, Clock.fixed(NOW, ZoneOffset.UTC), windowDays);
+                eventStore, () -> RMA_ID, numbers, lookup, Clock.fixed(NOW, ZoneOffset.UTC), windowDays);
     }
 
     private CreateReturnCommand command(Instant deliveredAt) {
@@ -119,5 +127,72 @@ class ReturnCommandServiceTest {
     @Test
     void rejectsInvalidReturnWindowConfiguration() {
         assertThatIllegalArgumentException().isThrownBy(() -> service(0));
+    }
+
+    private Rma requestedReturn() {
+        var command = command(NOW.minusSeconds(60));
+        return Rma.fromHistory(List.of(Rma.request(
+                RMA_ID,
+                NUMBER,
+                command.orderId(),
+                command.customerId(),
+                command.orderDeliveredAt(),
+                command.reason(),
+                command.customerNote(),
+                command.items(),
+                command.currency(),
+                NOW,
+                14)));
+    }
+
+    @Test
+    void cancelsUsingVersionBeforeDomainCommandAndServerTime() {
+        var rma = requestedReturn();
+        when(lookup.findId(NUMBER)).thenReturn(Optional.of(RMA_ID));
+        when(eventStore.load(RMA_ID)).thenReturn(Optional.of(rma));
+        service(14).cancel(NUMBER, "customer-1", "Changed mind");
+        verify(eventStore).append(RMA_ID, 1, List.of(new RmaCancelled(RMA_ID, "customer-1", NOW, "Changed mind")));
+        assertThat(rma.version()).isEqualTo(2);
+        assertThat(rma.status()).isEqualTo(RmaStatus.CANCELLED);
+        verifyNoInteractions(numbers);
+    }
+
+    @Test
+    void reportsUnknownNumberWithoutLoadingOrWritingEvents() {
+        when(lookup.findId(NUMBER)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service(14).cancel(NUMBER, "customer-1", null))
+                .isInstanceOf(ReturnNotFoundException.class);
+        verifyNoInteractions(eventStore);
+    }
+
+    @Test
+    void reportsMissingAggregateWithoutWritingEvents() {
+        when(lookup.findId(NUMBER)).thenReturn(Optional.of(RMA_ID));
+        when(eventStore.load(RMA_ID)).thenReturn(Optional.empty());
+        assertThatThrownBy(() -> service(14).cancel(NUMBER, "customer-1", null))
+                .isInstanceOf(ReturnNotFoundException.class);
+        verify(eventStore, never()).append(any(), anyLong(), anyList());
+    }
+
+    @Test
+    void doesNotWriteWhenDomainForbidsCancellation() {
+        var rma = requestedReturn();
+        rma.issueLabel("label", "tracking", "label.pdf", NOW);
+        rma.markParcelInTransit(NOW);
+        when(lookup.findId(NUMBER)).thenReturn(Optional.of(RMA_ID));
+        when(eventStore.load(RMA_ID)).thenReturn(Optional.of(rma));
+        assertThatThrownBy(() -> service(14).cancel(NUMBER, "customer-1", null))
+                .isInstanceOfSatisfying(RmaDomainException.class, error -> assertThat(error.code())
+                        .isEqualTo(RmaErrorCode.CANCELLATION_NOT_ALLOWED));
+        verify(eventStore, never()).append(any(), anyLong(), anyList());
+    }
+
+    @Test
+    void propagatesCancellationConcurrencyConflict() {
+        when(lookup.findId(NUMBER)).thenReturn(Optional.of(RMA_ID));
+        when(eventStore.load(RMA_ID)).thenReturn(Optional.of(requestedReturn()));
+        var conflict = new ConcurrencyConflictException("Concurrent update", null);
+        doThrow(conflict).when(eventStore).append(eq(RMA_ID), eq(1L), anyList());
+        assertThatThrownBy(() -> service(14).cancel(NUMBER, "customer-1", null)).isSameAs(conflict);
     }
 }
