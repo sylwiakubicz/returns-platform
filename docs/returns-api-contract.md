@@ -4,6 +4,30 @@
 Specyfikacja opisuje docelowe endpointy kroku 6; obecnie zaimplementowany jest
 wyłącznie `POST /admin/projections/rebuild`. Dokument nie oznacza wdrożenia API.
 
+## Stan realizacji punktu 2 planu API
+
+Gotowe są modele, porty i przypadki użycia tworzenia, anulowania, szczegółów,
+listy i pełnej historii zwrotu. Działają generator UUIDv7, transakcyjny generator
+numeru biznesowego oraz konfiguracja zegara UTC. Numery są przydzielane z licznika
+danego roku (wyznaczonego w UTC z czasu zgłoszenia); rollback cofa przydział,
+a przekroczenie 999999 jest odrzucane przez bazę. UUIDv7 nie gwarantuje kolejności
+w tej samej milisekundzie ani przy cofnięciu zegara.
+
+Tworzenie i anulowanie wykonują się w transakcji. Zapis zdarzeń aktualizuje
+projekcję przez istniejący adapter. Anulowanie przekazuje do magazynu wersję
+agregatu sprzed polecenia domenowego. Wyszukiwanie UUID po numerze korzysta
+ze zdarzenia RmaRequested, więc nie zależy od aktualności projekcji.
+
+Historia jest odczytywana od wersji 1, dekodowana przez StoredEventDecoder
+(z istniejącą obsługą upcastingu) i materializowana w liście przed zamknięciem
+strumienia oraz transakcji. HistoryEntry jest modelem aplikacyjnym, nie DTO HTTP;
+mapowanie na payload i aktualny schemaVersion z OpenAPI pozostaje do wykonania.
+
+ReturnQueryService nie jest jeszcze beanem Springa. Jego rejestracja oraz adapter
+PostgreSQL implementujący RmaProjectionReader należą do punktu 3. Kontrolery
+publiczne, endpointy symulacyjne, obsługa HTTP błędów i idempotencja nadal nie są
+zaimplementowane. Pełna ścieżka przez API pozostaje do wykonania.
+
 ## Ustalenia kontraktu
 
 - Ścieżki używają numeru `RMA-RRRR-NNNNNN`. UUID występuje wyłącznie
