@@ -104,6 +104,7 @@ class RebuildRmaProjectionIT {
         assertThat(row.get("business_number")).isEqualTo(requested.businessNumber());
         assertThat(row.get("status")).isEqualTo("LABEL_ISSUED");
         assertThat(row.get("refund_amount")).isNull();
+        assertThat(row.get("currency")).isEqualTo("PLN");
         assertThat(((java.sql.Timestamp) row.get("updated_at")).toInstant()).isEqualTo(label.occurredAt());
         assertThat(eventStore.load(requested.rmaId()).orElseThrow().version()).isEqualTo(2);
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
@@ -181,7 +182,7 @@ class RebuildRmaProjectionIT {
 
         String comparisonSql =
                 """
-                SELECT rma_id, business_number, status, refund_amount
+                SELECT rma_id, business_number, status, refund_amount, currency
                 FROM returns.rma_projection
                 ORDER BY rma_id
                 """;
@@ -340,6 +341,31 @@ class RebuildRmaProjectionIT {
                 14);
     }
 
+    @Test
+    void shouldPreserveEuroCurrencyOnCreationAndRebuild() {
+        var original = requested();
+        var euro = Currency.getInstance("EUR");
+        var request = new RmaRequested(
+                original.rmaId(),
+                original.businessNumber(),
+                original.orderId(),
+                original.customerId(),
+                original.orderDeliveredAt(),
+                original.requestedAt(),
+                original.reason(),
+                original.customerNote(),
+                euro,
+                List.of(new RequestedItem("item", "sku", "Book", 1, new Money(new BigDecimal("100.00"), euro))));
+        eventStore.append(request.rmaId(), 0, List.of(request));
+        assertThat(jdbcTemplate.queryForObject("SELECT currency FROM returns.rma_projection", String.class))
+                .isEqualTo("EUR");
+        jdbcTemplate.update("DELETE FROM returns.rma_projection");
+        rebuild.rebuild();
+        var row = jdbcTemplate.queryForMap("SELECT currency, refund_amount FROM returns.rma_projection");
+        assertThat(row.get("currency")).isEqualTo("EUR");
+        assertThat(row.get("refund_amount")).isNull();
+    }
+
     @Configuration
     @EnableTransactionManagement
     @Import({
@@ -365,7 +391,8 @@ class RebuildRmaProjectionIT {
                     + "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO returns_app");
             new ResourceDatabasePopulator(
                             new ClassPathResource("db/migration/V1__create_returns_schema.sql"),
-                            new ClassPathResource("db/migration/V2__allow_null_refund_amount_in_rma_projection.sql"))
+                            new ClassPathResource("db/migration/V2__allow_null_refund_amount_in_rma_projection.sql"),
+                            new ClassPathResource("db/migration/V3__add_currency_to_rma_projection.sql"))
                     .execute(dataSource);
             return jdbc;
         }

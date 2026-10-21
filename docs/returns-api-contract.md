@@ -36,8 +36,10 @@ zaimplementowane. Pełna ścieżka przez API pozostaje do wykonania.
   oraz symulacji zwracają `204`; stan można następnie odczytać przez GET.
 - Odczyt zawiera `businessNumber`, `status`, `refundAmount` i `updatedAt`.
   Kwota to obiekt z dokładną wartością dziesiętną jako tekstem i walutą ISO 4217;
-  przed decyzją refundacyjną jest `null`. Projekcja wymaga dodania waluty
-  nową migracją i obsługi jej podczas aktualizacji oraz odbudowy.
+  przed decyzją refundacyjną jest `null`. Walutę przechowuje kolumna `currency`
+  dodana migracją V3. Istniejące wpisy są uzupełniane ze zdarzeń RmaRequested,
+  a nowe wpisy i odbudowa zapisują walutę zgłoszenia. Brak waluty w historii
+  istniejącego wpisu zatrzymuje migrację zamiast przypisywać domyślne PLN.
 - `updatedAt` oznacza czas ostatniego zdarzenia zastosowanego do projekcji.
   Nie jest czasem obsługi żądania. Lista niesie ten znacznik dla każdego wpisu.
 - Paginacja: `page=0`, `size=20`, limit `100`; przekroczenie limitu daje `400`.

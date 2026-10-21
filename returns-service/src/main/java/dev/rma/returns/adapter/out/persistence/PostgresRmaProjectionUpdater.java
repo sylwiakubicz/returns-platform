@@ -31,12 +31,13 @@ public class PostgresRmaProjectionUpdater implements RmaProjectionUpdater {
                     case RmaRequested requested -> jdbcTemplate.update(
                             """
                     INSERT INTO returns.rma_projection
-                        (rma_id, business_number, status, refund_amount, updated_at)
-                    VALUES (?, ?, ?, NULL, ?)
+                        (rma_id, business_number, status, refund_amount, currency, updated_at)
+                    VALUES (?, ?, ?, NULL, ?, ?)
                     """,
                             requested.rmaId(),
                             requested.businessNumber(),
                             RmaStatus.REQUESTED.name(),
+                            requested.currency().getCurrencyCode(),
                             updatedAt);
                     case RefundDecided decided -> jdbcTemplate.update(
                             """

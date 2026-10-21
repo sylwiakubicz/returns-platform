@@ -619,7 +619,8 @@ class PostgresEventStoreIT {
             jdbc.execute("CREATE SCHEMA returns");
             new ResourceDatabasePopulator(
                             new ClassPathResource("db/migration/V1__create_returns_schema.sql"),
-                            new ClassPathResource("db/migration/V2__allow_null_refund_amount_in_rma_projection.sql"))
+                            new ClassPathResource("db/migration/V2__allow_null_refund_amount_in_rma_projection.sql"),
+                            new ClassPathResource("db/migration/V3__add_currency_to_rma_projection.sql"))
                     .execute(dataSource);
             return dataSource;
         }
