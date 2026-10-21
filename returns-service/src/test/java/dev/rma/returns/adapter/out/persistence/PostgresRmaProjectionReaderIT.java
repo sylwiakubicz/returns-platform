@@ -7,53 +7,64 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Currency;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.BeforeAll;
+import javax.sql.DataSource;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
+import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import dev.rma.returns.application.ReturnQueryService;
+import dev.rma.returns.application.exception.ReturnNotFoundException;
 import dev.rma.returns.application.model.ReturnQuery;
 import dev.rma.returns.application.model.ReturnView;
+import dev.rma.returns.application.port.in.GetReturnUseCase;
+import dev.rma.returns.application.port.in.ListReturnsUseCase;
+import dev.rma.returns.application.port.out.RmaProjectionReader;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.enums.RmaStatus;
 
 @Testcontainers
+@SpringJUnitConfig(PostgresRmaProjectionReaderIT.TestConfig.class)
 class PostgresRmaProjectionReaderIT {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
     private static final String NUMBER = "RMA-2026-000001";
     private static final Instant UPDATED_AT = Instant.parse("2026-10-21T10:00:00.123456Z");
-    private static JdbcTemplate jdbc;
-    private static PostgresRmaProjectionReader reader;
 
-    @BeforeAll
-    static void prepareDatabase() {
-        var source = new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
-        var admin = new JdbcTemplate(source);
-        admin.execute("CREATE ROLE returns_app LOGIN PASSWORD 'test-password'");
-        admin.execute("CREATE SCHEMA returns");
-        admin.execute("GRANT USAGE ON SCHEMA returns TO returns_app");
-        admin.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA returns "
-                + "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO returns_app");
-        new ResourceDatabasePopulator(
-                        new ClassPathResource("db/migration/V1__create_returns_schema.sql"),
-                        new ClassPathResource("db/migration/V2__allow_null_refund_amount_in_rma_projection.sql"),
-                        new ClassPathResource("db/migration/V3__add_currency_to_rma_projection.sql"))
-                .execute(source);
-        jdbc = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), "returns_app", "test-password"));
-        reader = new PostgresRmaProjectionReader(jdbc);
-    }
+    @Autowired
+    CountingJdbcTemplate jdbc;
+
+    @Autowired
+    RmaProjectionReader reader;
+
+    @Autowired
+    GetReturnUseCase getReturn;
+
+    @Autowired
+    ListReturnsUseCase listReturns;
 
     @BeforeEach
     void clearProjection() {
+        jdbc.afterCount = null;
         jdbc.update("DELETE FROM returns.rma_projection");
     }
 
@@ -162,6 +173,37 @@ class PostgresRmaProjectionReaderIT {
         assertThat(page.totalPages()).isZero();
     }
 
+    @Test
+    void readsDetailsAndListThroughSpringManagedServices() {
+        insert(NUMBER, "REQUESTED", null, "PLN");
+        assertThat(getReturn.get(NUMBER)).isEqualTo(new ReturnView(NUMBER, RmaStatus.REQUESTED, null, UPDATED_AT));
+        assertThat(listReturns.list(new ReturnQuery(0, 20, null)).content()).containsExactly(getReturn.get(NUMBER));
+        assertThatThrownBy(() -> getReturn.get("RMA-2026-999999")).isInstanceOf(ReturnNotFoundException.class);
+    }
+
+    @Test
+    void countAndPageSeeTheSameDataEvenIfAnotherTransactionAddsReturnBetweenQueries() {
+        insert(NUMBER, "REQUESTED", null, "PLN");
+        jdbc.afterCount = () -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive())
+                    .isTrue();
+            assertThat(TransactionSynchronizationManager.isCurrentTransactionReadOnly())
+                    .isTrue();
+            try (var executor = Executors.newSingleThreadExecutor()) {
+                executor.submit(() -> insert("RMA-2026-000002", "REQUESTED", null, "PLN"))
+                        .get(10, TimeUnit.SECONDS);
+            } catch (Exception exception) {
+                throw new IllegalStateException("Concurrent insertion failed", exception);
+            }
+        };
+        var page = listReturns.list(new ReturnQuery(0, 20, null));
+        assertThat(page.totalElements()).isEqualTo(1);
+        assertThat(page.content()).extracting(ReturnView::businessNumber).containsExactly(NUMBER);
+        // Kolejny odczyt widzi już nowy zwrot.
+        assertThat(listReturns.list(new ReturnQuery(0, 20, null)).totalElements())
+                .isEqualTo(2);
+    }
+
     private void insert(String number, String status, BigDecimal amount, String currency) {
         jdbc.update(
                 """
@@ -175,5 +217,57 @@ class PostgresRmaProjectionReaderIT {
                 amount,
                 currency,
                 Timestamp.from(UPDATED_AT));
+    }
+    /** Pozwala w teście wstawić drugi zwrot dokładnie pomiędzy COUNT i odczytem strony. */
+    static class CountingJdbcTemplate extends JdbcTemplate {
+        Runnable afterCount;
+
+        CountingJdbcTemplate(DataSource source) {
+            super(source);
+        }
+
+        @Override
+        public <T> T queryForObject(String sql, Class<T> type, Object... args) {
+            T result = super.queryForObject(sql, type, args);
+            if (sql.startsWith("SELECT count(*)") && afterCount != null) {
+                Runnable action = afterCount;
+                afterCount = null;
+                action.run();
+            }
+            return result;
+        }
+    }
+
+    @Configuration
+    @EnableTransactionManagement
+    @Import({PostgresRmaProjectionReader.class, ReturnQueryService.class})
+    static class TestConfig {
+        @Bean
+        DataSource dataSource() {
+            var source =
+                    new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+            var admin = new JdbcTemplate(source);
+            admin.execute("CREATE ROLE returns_app LOGIN PASSWORD 'test-password'");
+            admin.execute("CREATE SCHEMA returns");
+            admin.execute("GRANT USAGE ON SCHEMA returns TO returns_app");
+            admin.execute("ALTER DEFAULT PRIVILEGES IN SCHEMA returns "
+                    + "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO returns_app");
+            new ResourceDatabasePopulator(
+                            new ClassPathResource("db/migration/V1__create_returns_schema.sql"),
+                            new ClassPathResource("db/migration/V2__allow_null_refund_amount_in_rma_projection.sql"),
+                            new ClassPathResource("db/migration/V3__add_currency_to_rma_projection.sql"))
+                    .execute(source);
+            return new DriverManagerDataSource(POSTGRES.getJdbcUrl(), "returns_app", "test-password");
+        }
+
+        @Bean
+        CountingJdbcTemplate jdbcTemplate(DataSource source) {
+            return new CountingJdbcTemplate(source);
+        }
+
+        @Bean
+        PlatformTransactionManager transactionManager(DataSource source) {
+            return new DataSourceTransactionManager(source);
+        }
     }
 }

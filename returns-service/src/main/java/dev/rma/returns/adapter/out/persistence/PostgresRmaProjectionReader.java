@@ -8,6 +8,7 @@ import java.util.Optional;
 
 import org.springframework.dao.support.DataAccessUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,6 +19,7 @@ import dev.rma.returns.application.port.out.RmaProjectionReader;
 import dev.rma.returns.domain.Money;
 import dev.rma.returns.domain.enums.RmaStatus;
 
+@Repository
 public class PostgresRmaProjectionReader implements RmaProjectionReader {
     private final JdbcTemplate jdbcTemplate;
 

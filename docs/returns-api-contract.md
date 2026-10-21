@@ -23,8 +23,10 @@ Historia jest odczytywana od wersji 1, dekodowana przez StoredEventDecoder
 strumienia oraz transakcji. HistoryEntry jest modelem aplikacyjnym, nie DTO HTTP;
 mapowanie na payload i aktualny schemaVersion z OpenAPI pozostaje do wykonania.
 
-ReturnQueryService nie jest jeszcze beanem Springa. Jego rejestracja oraz adapter
-PostgreSQL implementujący RmaProjectionReader należą do punktu 3. Kontrolery
+ReturnQueryService i PostgresRmaProjectionReader są zarejestrowane w Springu.
+Szczegóły i lista są odczytywane z PostgreSQL. Liczenie wyników i pobieranie strony
+działają w jednej transakcji tylko do odczytu, na poziomie REPEATABLE_READ,
+więc widzą ten sam stan danych pomimo równoczesnych zapisów. Kontrolery
 publiczne, endpointy symulacyjne, obsługa HTTP błędów i idempotencja nadal nie są
 zaimplementowane. Pełna ścieżka przez API pozostaje do wykonania.
 
