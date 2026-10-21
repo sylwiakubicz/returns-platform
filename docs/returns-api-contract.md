@@ -27,8 +27,18 @@ ReturnQueryService i PostgresRmaProjectionReader są zarejestrowane w Springu.
 Szczegóły i lista są odczytywane z PostgreSQL. Liczenie wyników i pobieranie strony
 działają w jednej transakcji tylko do odczytu, na poziomie REPEATABLE_READ,
 więc widzą ten sam stan danych pomimo równoczesnych zapisów. Kontrolery
-publiczne, endpointy symulacyjne, obsługa HTTP błędów i idempotencja nadal nie są
+publiczne, endpointy symulacyjne i obsługa HTTP błędów nadal nie są
 zaimplementowane. Pełna ścieżka przez API pozostaje do wykonania.
+
+Punkt 4, partie 1–3: IdempotentReturnCreationService oblicza SHA-256 surowego
+ciała i sam odczytuje z niego zgłoszenie (żeby skrót i dane operacji dotyczyły
+tych samych bajtów). Nowy klucz tworzy zwrot oraz zapisuje status 201 i JSON
+odpowiedzi w jednej transakcji. Powtórzenie zwraca zapisane dane; Location
+jest odtwarzane z zapisanego businessNumber. Inne ciało dla tego samego klucza
+zgłasza IdempotencyKeyReuseException, przeznaczony do mapowania na HTTP 422.
+JSONB zachowuje dane odpowiedzi, ale nie jej oryginalne formatowanie.
+Obsługa równoczesnych żądań i retencja 24 godziny pozostają w partiach 4–5;
+obecna implementacja nie jest jeszcze kompletną obsługą idempotencji.
 
 ## Ustalenia kontraktu
 
