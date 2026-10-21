@@ -42,6 +42,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
 import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import dev.rma.returns.application.RebuildRmaProjectionService;
+import dev.rma.returns.application.ReturnHistoryService;
+import dev.rma.returns.application.ReturnQueryService;
+import dev.rma.returns.application.model.ReturnQuery;
+import dev.rma.returns.application.port.in.GetReturnHistoryUseCase;
+import dev.rma.returns.application.port.in.GetReturnUseCase;
+import dev.rma.returns.application.port.in.ListReturnsUseCase;
 import dev.rma.returns.application.port.in.RebuildRmaProjectionUseCase;
 import dev.rma.returns.application.port.out.EventStore;
 import dev.rma.returns.domain.InspectionResult;
@@ -68,6 +74,15 @@ class RebuildRmaProjectionIT {
 
     @Autowired
     EventStore eventStore;
+
+    @Autowired
+    GetReturnUseCase getReturn;
+
+    @Autowired
+    ListReturnsUseCase listReturns;
+
+    @Autowired
+    GetReturnHistoryUseCase getHistory;
 
     @Autowired
     JdbcTemplate jdbcTemplate;
@@ -291,6 +306,69 @@ class RebuildRmaProjectionIT {
                 .isEqualTo(requested.rmaId());
     }
 
+    @Test
+    void shouldReadCompleteHistoryBeforeAndAfterSnapshotWithoutProjection() {
+        List<DomainEvent> events = inspectionHistory(ItemGrade.A);
+        var rma = Rma.fromHistory(events);
+        Instant at = events.getLast().occurredAt();
+        while (events.size() < 51) {
+            at = at.plusSeconds(60);
+            events.add(
+                    rma.failRefund(FailureCode.TIMEOUT, "timeout", rma.state().payoutAttempt(), true, at));
+            at = at.plusSeconds(60);
+            events.add(rma.retryRefund(at));
+        }
+        eventStore.append(rma.rmaId(), 0, events);
+        int snapshotVersion = events.size();
+        assertThat(jdbcTemplate.queryForObject(
+                        "SELECT version FROM returns.rma_snapshots WHERE rma_id = ?", Integer.class, rma.rmaId()))
+                .isEqualTo(snapshotVersion);
+        var lastEvent =
+                rma.failRefund(FailureCode.TIMEOUT, "timeout", rma.state().payoutAttempt(), true, at.plusSeconds(60));
+        eventStore.append(rma.rmaId(), snapshotVersion, List.of(lastEvent));
+        events.add(lastEvent);
+        // Historia musi działać również bez tabeli z bieżącym stanem zwrotu.
+        jdbcTemplate.update("DELETE FROM returns.rma_projection");
+
+        var history = getHistory.history(rma.businessNumber());
+
+        assertThat(history).hasSize(events.size());
+        assertThat(history).extracting(entry -> entry.event()).containsExactlyElementsOf(events);
+        assertThat(history)
+                .extracting(entry -> entry.version())
+                .containsExactlyElementsOf(java.util.stream.LongStream.rangeClosed(1, events.size())
+                        .boxed()
+                        .toList());
+        assertThat(history).extracting(entry -> entry.eventId()).doesNotHaveDuplicates();
+        assertThat(history)
+                .extracting(entry -> entry.eventId())
+                .containsExactlyElementsOf(jdbcTemplate.queryForList(
+                        "SELECT event_id FROM returns.rma_events WHERE rma_id = ? ORDER BY version",
+                        UUID.class,
+                        rma.rmaId()));
+        assertThat(history).allSatisfy(entry -> {
+            assertThat(entry.rmaId()).isEqualTo(rma.rmaId());
+            assertThat(entry.occurredAt()).isEqualTo(entry.event().occurredAt());
+        });
+    }
+
+    @Test
+    void shouldReturnSameDetailsListAndHistoryAfterProjectionRebuild() {
+        var events = inspectionHistory(ItemGrade.A);
+        persistHistory(events);
+        String number = ((RmaRequested) events.getFirst()).businessNumber();
+        var detailsBefore = getReturn.get(number);
+        var listBefore = listReturns.list(new ReturnQuery(0, 20, null));
+        var historyBefore = getHistory.history(number);
+        jdbcTemplate.update("DELETE FROM returns.rma_projection");
+
+        rebuild.rebuild();
+
+        assertThat(getReturn.get(number)).isEqualTo(detailsBefore);
+        assertThat(listReturns.list(new ReturnQuery(0, 20, null))).isEqualTo(listBefore);
+        assertThat(getHistory.history(number)).isEqualTo(historyBefore);
+    }
+
     private void awaitBlockedLock(String mode) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
@@ -373,6 +451,10 @@ class RebuildRmaProjectionIT {
         PostgresRmaProjectionUpdater.class,
         PostgresRmaProjectionResetter.class,
         RebuildRmaProjectionService.class,
+        ReturnHistoryService.class,
+        ReturnQueryService.class,
+        PostgresRmaProjectionReader.class,
+        PostgresRmaIdLookup.class,
         EventJsonMapper.class,
         EventUpcasting.class,
         RmaStateJsonMapper.class

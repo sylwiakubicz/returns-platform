@@ -32,6 +32,13 @@ zaimplementowane. Pełna ścieżka przez API pozostaje do wykonania.
 
 ## Ustalenia kontraktu
 
+Punkt 3 planu API jest zakończony: odczyt pojedynczego zwrotu, lista z filtrem
+stanu i paginacją oraz pełna historia działają z PostgreSQL. Test integracyjny
+potwierdza odczyt całej historii także przy istniejącym snapshocie i pustej
+projekcji. Drugi test porównuje szczegóły, listę oraz historię przed odbudową
+projekcji i po niej. Endpointy HTTP pozostają do implementacji w kolejnych
+punktach planu; testy te wywołują bezpośrednio operacje aplikacji.
+
 - Ścieżki używają numeru `RMA-RRRR-NNNNNN`. UUID występuje wyłącznie
   w metadanych historii, nigdy jako parametr ścieżki.
 - Utworzenie zwraca `201`, model projekcji i `Location`. Polecenia anulowania
