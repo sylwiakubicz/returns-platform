@@ -4,6 +4,7 @@ import java.time.Clock;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -34,13 +35,14 @@ public class IdempotentReturnCreationService {
         this.clock = clock;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public ReturnCreationResponse create(String key, byte[] body) {
         if (key == null || key.isBlank() || key.length() > 255) {
             throw new IllegalArgumentException("Idempotency-Key must contain between 1 and 255 characters");
         }
         Objects.requireNonNull(body, "body must not be null");
         String hash = RequestBodyHasher.sha256(body);
+        store.lock(key, ENDPOINT);
         var saved = store.find(key, ENDPOINT);
         if (saved.isPresent()) {
             if (!saved.get().requestHash().equals(hash)) {

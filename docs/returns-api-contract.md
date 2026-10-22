@@ -37,8 +37,17 @@ odpowiedzi w jednej transakcji. Powtórzenie zwraca zapisane dane; Location
 jest odtwarzane z zapisanego businessNumber. Inne ciało dla tego samego klucza
 zgłasza IdempotencyKeyReuseException, przeznaczony do mapowania na HTTP 422.
 JSONB zachowuje dane odpowiedzi, ale nie jej oryginalne formatowanie.
-Obsługa równoczesnych żądań i retencja 24 godziny pozostają w partiach 4–5;
-obecna implementacja nie jest jeszcze kompletną obsługą idempotencji.
+Partia 4: przed odczytem klucza operacja uzyskuje transakcyjną blokadę PostgreSQL
+dla pary klucz–ścieżka. Drugie żądanie z tą samą parą czeka do commit lub rollback
+pierwszego. READ_COMMITTED pozwala następnie odczytać zatwierdzoną odpowiedź.
+Blokada nie tworzy wpisu klucza i nie wymaga zmiany schematu. Jej identyfikator
+to 64 bity skrótu pary; ewentualna kolizja skrótów powoduje tylko dodatkowe
+czekanie, a porównanie klucza i skrótu ciała nadal korzysta z pełnych wartości.
+To blokada obsługi idempotencji, niezależna od kontroli wersji agregatu, która
+nadal opiera się na unikalności (rma_id, version). Test identycznych równoczesnych
+żądań jest powtarzany 20 razy; dodatkowe testy obejmują różne ciała i rollback
+pierwszego żądania podczas oczekiwania drugiego. Retencja 24 godziny pozostaje
+do implementacji w partii 5.
 
 ## Ustalenia kontraktu
 
