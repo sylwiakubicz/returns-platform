@@ -2,6 +2,8 @@ package dev.rma.returns.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
@@ -20,6 +22,8 @@ import javax.sql.DataSource;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
@@ -27,6 +31,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -34,6 +39,8 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -44,6 +51,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.rma.returns.adapter.in.scheduling.IdempotencyCleanupJob;
+import dev.rma.returns.adapter.in.web.ReturnApiExceptionHandler;
+import dev.rma.returns.adapter.in.web.ReturnCreationController;
 import dev.rma.returns.adapter.out.id.UuidV7RmaIdGenerator;
 import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
 import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
@@ -87,6 +96,14 @@ class IdempotentReturnCreationIT {
     @Autowired
     PlatformTransactionManager transactionManager;
 
+    @Autowired
+    ReturnCreationController controller;
+
+    @Autowired
+    ReturnApiExceptionHandler exceptionHandler;
+
+    private MockMvc mvc;
+
     private static final String JSON =
             """
         {"orderId":"order-1","customerId":"customer-1","orderDeliveredAt":"2026-10-20T10:00:00Z",
@@ -100,6 +117,9 @@ class IdempotentReturnCreationIT {
 
     @BeforeEach
     void clearDatabase() {
+        mvc = MockMvcBuilders.standaloneSetup(controller)
+                .setControllerAdvice(exceptionHandler)
+                .build();
         admin.update("DELETE FROM returns.rma_snapshots");
         admin.update("DELETE FROM returns.rma_events");
         admin.update("DELETE FROM returns.rma_projection");
@@ -347,11 +367,178 @@ class IdempotentReturnCreationIT {
                 .isEqualTo(1);
     }
 
+    @Test
+    void httpCreatesAndReplaysReturnWithLocation() throws Exception {
+        var first = mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "http-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body()))
+                .andExpect(status().isCreated())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(header().string("Location", "/api/v1/returns/RMA-2026-000001"))
+                .andExpect(jsonPath("$.businessNumber").value("RMA-2026-000001"))
+                .andExpect(jsonPath("$.status").value("REQUESTED"))
+                .andExpect(jsonPath("$.refundAmount").isEmpty())
+                .andExpect(jsonPath("$.updatedAt").value("2026-10-21T10:00:00Z"))
+                .andReturn();
+        var second = mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "http-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body()))
+                .andExpect(status().isCreated())
+                .andExpect(header().string("Location", "/api/v1/returns/RMA-2026-000001"))
+                .andReturn();
+        assertThat(mapper.readTree(first.getResponse().getContentAsByteArray()))
+                .isEqualTo(mapper.readTree(second.getResponse().getContentAsByteArray()));
+        assertSingleReturn();
+    }
+
+    @Test
+    void httpReturns422ForReusedKeyWithDifferentBody() throws Exception {
+        service.create("http-key", body());
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "http-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{invalid"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"))
+                .andExpect(jsonPath("$.status").value(422))
+                .andExpect(jsonPath("$.instance").value("/api/v1/returns"));
+        assertSingleReturn();
+    }
+
+    @Test
+    void httpRejectsMissingHeaderAndUnsupportedMediaType() throws Exception {
+        mvc.perform(post("/api/v1/returns")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body()))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "key")
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content(body()))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isZero();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{invalid", "null", "{}", "[]"})
+    void httpRejectsMalformedOrIncompleteRequestsWithoutReservingKey(String body) throws Exception {
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.errors[0].field").isNotEmpty());
+        assertThat(store.find("key", "/api/v1/returns")).isEmpty();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isZero();
+    }
+
+    @Test
+    void httpRejectsUnknownFieldsAndExtraJsonObjects() throws Exception {
+        for (String invalid :
+                new String[] {JSON + "{}", JSON.replace("\"orderId\":", "\"unknown\":true,\"orderId\":")}) {
+            mvc.perform(post("/api/v1/returns")
+                            .header("Idempotency-Key", "key")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(invalid))
+                    .andExpect(status().isBadRequest());
+        }
+        assertThat(store.find("key", "/api/v1/returns")).isEmpty();
+    }
+
+    @Test
+    void httpRejectsIncompatibleAcceptHeader() throws Exception {
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .accept(MediaType.APPLICATION_XML)
+                        .content(body()))
+                .andExpect(status().isNotAcceptable())
+                .andExpect(jsonPath("$.code").value("NOT_ACCEPTABLE"));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isZero();
+    }
+
+    @Test
+    void httpRejectsFractionalQuantityInsteadOfSilentlyRoundingIt() throws Exception {
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.replace("\"quantity\":1", "\"quantity\":1.5")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("items[0].quantity"));
+    }
+
+    @Test
+    void httpPreservesRawBodyForIdempotencyComparison() throws Exception {
+        service.create("key", body());
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON + " "))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REUSED"));
+    }
+
+    @Test
+    void httpRejectsBlankOrOversizedKeys() throws Exception {
+        for (String key : new String[] {" ", "a".repeat(256)}) {
+            mvc.perform(post("/api/v1/returns")
+                            .header("Idempotency-Key", key)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body()))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors[0].field").value("Idempotency-Key"));
+        }
+    }
+
+    @Test
+    void httpReportsDomainRejectionAs422() throws Exception {
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON.replace("2026-10-20", "2026-09-01")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("RETURN_WINDOW_EXPIRED"));
+    }
+
+    @Test
+    void httpHidesDatabaseDetailsOnUnexpectedFailure() throws Exception {
+        admin.execute(
+                "ALTER TABLE returns.idempotency_keys ADD CONSTRAINT test_http_failure CHECK (response_status <> 201)");
+        try {
+            mvc.perform(post("/api/v1/returns")
+                            .header("Idempotency-Key", "key")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body()))
+                    .andExpect(status().isInternalServerError())
+                    .andExpect(jsonPath("$.code").value("INTERNAL_ERROR"))
+                    .andExpect(jsonPath("$.trace").doesNotExist())
+                    .andExpect(content()
+                            .string(org.hamcrest.Matchers.not(
+                                    org.hamcrest.Matchers.containsString("test_http_failure"))));
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                    .isZero();
+        } finally {
+            admin.execute("ALTER TABLE returns.idempotency_keys DROP CONSTRAINT test_http_failure");
+        }
+    }
+
     @Configuration
     @EnableTransactionManagement
     @Import({
         PostgresEventStore.class,
         IdempotentReturnCreationService.class,
+        ReturnCreationController.class,
+        ReturnApiExceptionHandler.class,
         IdempotencyCleanupJob.class,
         ReturnCommandService.class,
         PostgresIdempotencyStore.class,

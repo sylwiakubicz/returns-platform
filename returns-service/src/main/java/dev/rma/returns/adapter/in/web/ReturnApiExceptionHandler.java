@@ -1,0 +1,92 @@
+package dev.rma.returns.adapter.in.web;
+
+import java.net.URI;
+import java.util.List;
+import java.util.Map;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
+import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
+
+import dev.rma.returns.application.exception.IdempotencyKeyReuseException;
+import dev.rma.returns.application.exception.InvalidReturnRequestException;
+import dev.rma.returns.domain.exceptions.RmaDomainException;
+
+/** Obsługa błędów tworzenia i protokołu HTTP; wspólne uporządkowanie w module common pozostaje do wykonania. */
+@RestControllerAdvice
+public class ReturnApiExceptionHandler extends ResponseEntityExceptionHandler {
+    private static final Logger LOG = LoggerFactory.getLogger(ReturnApiExceptionHandler.class);
+
+    @ExceptionHandler(InvalidReturnRequestException.class)
+    public ResponseEntity<Object> invalidRequest(InvalidReturnRequestException exception, WebRequest request) {
+        var problem = problem(400, "INVALID_REQUEST", "Invalid request", exception.getMessage(), request);
+        problem.setProperty("errors", List.of(Map.of("field", exception.field(), "message", exception.getMessage())));
+        return response(problem, HttpHeaders.EMPTY);
+    }
+
+    @ExceptionHandler(IdempotencyKeyReuseException.class)
+    public ResponseEntity<Object> keyReuse(IdempotencyKeyReuseException exception, WebRequest request) {
+        return response(
+                problem(422, "IDEMPOTENCY_KEY_REUSED", "Idempotency key conflict", exception.getMessage(), request),
+                HttpHeaders.EMPTY);
+    }
+
+    @ExceptionHandler(RmaDomainException.class)
+    public ResponseEntity<Object> domainFailure(RmaDomainException exception, WebRequest request) {
+        return response(
+                problem(422, exception.code().name(), "Return rejected", exception.getMessage(), request),
+                HttpHeaders.EMPTY);
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<Object> unexpectedFailure(Exception exception, WebRequest request) {
+        LOG.error("Unexpected return creation failure", exception);
+        return response(
+                problem(500, "INTERNAL_ERROR", "Internal server error", "The request could not be completed", request),
+                HttpHeaders.EMPTY);
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleExceptionInternal(
+            Exception exception, Object body, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        String code =
+                switch (status.value()) {
+                    case 400 -> "INVALID_REQUEST";
+                    case 415 -> "UNSUPPORTED_MEDIA_TYPE";
+                    case 406 -> "NOT_ACCEPTABLE";
+                    default -> "HTTP_REQUEST_ERROR";
+                };
+        var problem =
+                problem(status.value(), code, "HTTP request error", "Check the request headers and body", request);
+        if (status.value() == 400) {
+            problem.setProperty(
+                    "errors", List.of(Map.of("field", "$", "message", "Check required headers and request body")));
+        }
+        return response(problem, headers);
+    }
+
+    private ProblemDetail problem(int status, String code, String title, String detail, WebRequest request) {
+        var problem = ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(status), detail);
+        problem.setTitle(title);
+        problem.setType(URI.create("/docs/03-kontrakty.md#"
+                + code.toLowerCase(java.util.Locale.ROOT).replace('_', '-')));
+        problem.setInstance(URI.create(request.getDescription(false).substring("uri=".length())));
+        problem.setProperty("code", code);
+        return problem;
+    }
+
+    private ResponseEntity<Object> response(ProblemDetail problem, HttpHeaders headers) {
+        return ResponseEntity.status(problem.getStatus())
+                .headers(headers)
+                .contentType(MediaType.APPLICATION_PROBLEM_JSON)
+                .body(problem);
+    }
+}

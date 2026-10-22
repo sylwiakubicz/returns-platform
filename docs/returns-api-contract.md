@@ -1,8 +1,9 @@
 # Kontrakt API zwrotów — etap 3, krok 6
 
 Źródłem kontraktu jest `contracts/src/main/resources/openapi/returns-v1.yaml`.
-Specyfikacja opisuje docelowe endpointy kroku 6; obecnie zaimplementowany jest
-wyłącznie `POST /admin/projections/rebuild`. Dokument nie oznacza wdrożenia API.
+Specyfikacja opisuje docelowe endpointy kroku 6. Obecnie działają
+`POST /admin/projections/rebuild` i `POST /api/v1/returns`; pozostałe endpointy
+publiczne oraz symulacyjne pozostają do wykonania.
 
 ## Stan realizacji punktu 2 planu API
 
@@ -26,9 +27,9 @@ mapowanie na payload i aktualny schemaVersion z OpenAPI pozostaje do wykonania.
 ReturnQueryService i PostgresRmaProjectionReader są zarejestrowane w Springu.
 Szczegóły i lista są odczytywane z PostgreSQL. Liczenie wyników i pobieranie strony
 działają w jednej transakcji tylko do odczytu, na poziomie REPEATABLE_READ,
-więc widzą ten sam stan danych pomimo równoczesnych zapisów. Kontrolery
-publiczne, endpointy symulacyjne i obsługa HTTP błędów nadal nie są
-zaimplementowane. Pełna ścieżka przez API pozostaje do wykonania.
+więc widzą ten sam stan danych pomimo równoczesnych zapisów. Pozostałe kontrolery
+publiczne i endpointy symulacyjne nadal nie są zaimplementowane. Pełna ścieżka
+przez API pozostaje do wykonania.
 
 Punkt 4, partie 1–3: IdempotentReturnCreationService oblicza SHA-256 surowego
 ciała i sam odczytuje z niego zgłoszenie (żeby skrót i dane operacji dotyczyły
@@ -56,8 +57,7 @@ transakcji. Wygaśnięcie nie zależy więc od momentu ostatniego czyszczenia ta
 Wpis mający dokładnie 24 godziny nadal obowiązuje (usuwamy starsze wpisy).
 Czyszczenie nie usuwa zwrotów ani ich historii. Po wygaśnięciu ten sam klucz
 może utworzyć kolejny zwrot, również dla zmienionego ciała żądania.
-Punkt 4 planu jest zakończony w warstwie aplikacji i bazy. Mapowanie wyjątków
-na HTTP 400/422 i wystawienie endpointu nadal należą do kolejnych punktów.
+Punkt 4 planu jest zakończony w warstwie aplikacji i bazy. Endpoint tworzenia i jego mapowanie błędów zostały dodane w punkcie 5, partii 1.
 
 ## Ustalenia kontraktu
 
@@ -125,3 +125,19 @@ Reguły lintera: https://redocly.com/docs/cli/commands/lint.
 Brakuje źródłowej specyfikacji `docs/01-domena.md` i diagramów. Powyższe
 ustalenia oparto na dokumencie etapu oraz obecnym modelu domeny; trzeba je
 porównać ze specyfikacją domeny przed implementacją przypadków użycia.
+
+## Punkt 5 — partia 1: endpoint tworzenia
+
+`POST /api/v1/returns` wymaga JSON i nagłówka Idempotency-Key. Kontroler przekazuje
+surowe bajty do IdempotentReturnCreationService; zwraca zapisany status 201, JSON
+oraz Location. Zgłoszenie jest odczytywane dopiero po sprawdzeniu klucza. Parser
+sprawdza wymagane pola i ich format, odrzuca nieznane pola oraz dodatkowy JSON
+po pierwszym obiekcie. Ilości muszą być całkowite; kwoty mają postać tekstu
+z dwoma miejscami po przecinku. Reguły terminu i zgodności walut sprawdza domena.
+
+ReturnApiExceptionHandler obsługuje błędy tworzenia oraz protokołu HTTP
+(również gdy Spring odrzuci żądanie przed wyborem kontrolera). Zwraca
+ProblemDetail dla błędnego wejścia (400), konfliktu klucza i odmowy domeny (422),
+nieobsługiwanego typu treści (415), nieakceptowanej odpowiedzi (406) i błędu
+wewnętrznego (500). Katalog kodów znajduje się w docs/03-kontrakty.md.
+Wspólna obsługa wszystkich endpointów pozostaje do późniejszego uporządkowania.

@@ -2,7 +2,6 @@ package dev.rma.returns.application;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.util.Objects;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -11,11 +10,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 import dev.rma.common.idempotency.RequestBodyHasher;
 import dev.rma.returns.application.exception.IdempotencyKeyReuseException;
 import dev.rma.returns.application.exception.InvalidReturnRequestException;
-import dev.rma.returns.application.model.CreateReturnCommand;
 import dev.rma.returns.application.model.IdempotencyRecord;
 import dev.rma.returns.application.model.ReturnCreationResponse;
 import dev.rma.returns.application.port.in.CreateReturnUseCase;
@@ -29,6 +28,7 @@ public class IdempotentReturnCreationService {
     private final ObjectMapper mapper;
     private final Clock clock;
     private final Duration retention;
+    private final ReturnCreationRequestReader requestReader;
 
     public IdempotentReturnCreationService(
             CreateReturnUseCase creator,
@@ -44,15 +44,19 @@ public class IdempotentReturnCreationService {
         this.creator = creator;
         this.store = store;
         this.mapper = mapper;
+        this.requestReader = new ReturnCreationRequestReader(mapper);
         this.clock = clock;
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public ReturnCreationResponse create(String key, byte[] body) {
         if (key == null || key.isBlank() || key.length() > 255) {
-            throw new IllegalArgumentException("Idempotency-Key must contain between 1 and 255 characters");
+            throw new InvalidReturnRequestException(
+                    "Idempotency-Key", "Idempotency-Key must contain between 1 and 255 characters");
         }
-        Objects.requireNonNull(body, "body must not be null");
+        if (body == null) {
+            throw new InvalidReturnRequestException("$", "Request body is required");
+        }
         String hash = RequestBodyHasher.sha256(body);
         store.lock(key, ENDPOINT);
         store.deleteExpired(key, ENDPOINT, clock.instant().minus(retention));
@@ -63,19 +67,13 @@ public class IdempotentReturnCreationService {
             }
             return response(saved.get());
         }
-        CreateReturnCommand command;
-        try {
-            command = mapper.readValue(body, CreateReturnCommand.class);
-            if (command == null) {
-                throw new InvalidReturnRequestException(null);
-            }
-        } catch (java.io.IOException exception) {
-            throw new InvalidReturnRequestException(exception);
-        }
+        var command = requestReader.read(body);
         var view = creator.create(command);
         String responseBody;
         try {
-            responseBody = mapper.writeValueAsString(view);
+            responseBody = mapper.writer()
+                    .without(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                    .writeValueAsString(view);
         } catch (JsonProcessingException exception) {
             throw new IllegalStateException("Cannot serialize return creation response", exception);
         }

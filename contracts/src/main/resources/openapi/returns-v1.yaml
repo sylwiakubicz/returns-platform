@@ -43,6 +43,18 @@
           "$ref": "#/components/responses/Error400"
         "422":
           "$ref": "#/components/responses/Error422"
+        "406":
+          "description": "The Accept header does not allow a JSON response."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "API is open until project stage 4. IDs and request time are assigned by the server. All item currencies must equal currency. Event append, projection update and idempotency response storage commit atomically. Idempotency is scoped to key plus endpoint; SHA-256 is calculated over the exact request body bytes. Changing whitespace also changes the hash. Concurrent identical requests create one return and replay its response. Failed transactions do not reserve keys. Records expire after 24 hours; reuse after expiry can create a new return."
