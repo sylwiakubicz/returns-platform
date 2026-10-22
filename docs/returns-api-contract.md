@@ -46,8 +46,18 @@ czekanie, a porównanie klucza i skrótu ciała nadal korzysta z pełnych warto�
 To blokada obsługi idempotencji, niezależna od kontroli wersji agregatu, która
 nadal opiera się na unikalności (rma_id, version). Test identycznych równoczesnych
 żądań jest powtarzany 20 razy; dodatkowe testy obejmują różne ciała i rollback
-pierwszego żądania podczas oczekiwania drugiego. Retencja 24 godziny pozostaje
-do implementacji w partii 5.
+pierwszego żądania podczas oczekiwania drugiego.
+
+Partia 5: wpisy starsze niż 24 godziny są usuwane przez IdempotencyCleanupJob,
+domyślnie co godzinę. Konfiguracja: returns.idempotency.retention=PT24H oraz
+returns.idempotency.cleanup-delay=PT1H. Przy obsłudze konkretnego klucza jego
+przeterminowany wpis jest również usuwany, po uzyskaniu blokady i w tej samej
+transakcji. Wygaśnięcie nie zależy więc od momentu ostatniego czyszczenia tabeli.
+Wpis mający dokładnie 24 godziny nadal obowiązuje (usuwamy starsze wpisy).
+Czyszczenie nie usuwa zwrotów ani ich historii. Po wygaśnięciu ten sam klucz
+może utworzyć kolejny zwrot, również dla zmienionego ciała żądania.
+Punkt 4 planu jest zakończony w warstwie aplikacji i bazy. Mapowanie wyjątków
+na HTTP 400/422 i wystawienie endpointu nadal należą do kolejnych punktów.
 
 ## Ustalenia kontraktu
 

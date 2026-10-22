@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -41,6 +43,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import dev.rma.returns.adapter.in.scheduling.IdempotencyCleanupJob;
 import dev.rma.returns.adapter.out.id.UuidV7RmaIdGenerator;
 import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
 import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
@@ -74,6 +77,9 @@ class IdempotentReturnCreationIT {
 
     @Autowired
     ObjectMapper mapper;
+
+    @Autowired
+    IdempotencyCleanupJob cleanupJob;
 
     @Autowired
     IdempotencyStore store;
@@ -280,11 +286,73 @@ class IdempotentReturnCreationIT {
                 .isEqualTo(1);
     }
 
+    @Test
+    void expiredKeyCanCreateNewReturnWithoutWaitingForCleanup() {
+        var first = service.create("key-1", body());
+        Instant cutoff = Instant.parse("2026-10-21T10:00:00Z").minus(Duration.ofHours(24));
+        admin.update(
+                "UPDATE returns.idempotency_keys SET created_at = ? WHERE idempotency_key = ?",
+                Timestamp.from(cutoff.minusNanos(1000)),
+                "key-1");
+        var second = service.create("key-1", JSON.replace("order-1", "order-2").getBytes(StandardCharsets.UTF_8));
+        assertThat(second.location()).isNotEqualTo(first.location()).endsWith("RMA-2026-000002");
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.idempotency_keys", Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void cleanupDeletesOnlyEntriesOlderThan24HoursAndKeepsReturnHistory() {
+        service.create("old", body());
+        var boundary = service.create("boundary", body());
+        service.create("recent", body());
+        Instant cutoff = Instant.parse("2026-10-21T10:00:00Z").minus(Duration.ofHours(24));
+        admin.update(
+                "UPDATE returns.idempotency_keys SET created_at = ? WHERE idempotency_key = 'old'",
+                Timestamp.from(cutoff.minusNanos(1000)));
+        admin.update(
+                "UPDATE returns.idempotency_keys SET created_at = ? WHERE idempotency_key = 'boundary'",
+                Timestamp.from(cutoff));
+        admin.update(
+                "UPDATE returns.idempotency_keys SET created_at = ? WHERE idempotency_key = 'recent'",
+                Timestamp.from(cutoff.plusNanos(1000)));
+
+        assertThat(cleanupJob.cleanup()).isEqualTo(1);
+        assertThat(store.find("old", "/api/v1/returns")).isEmpty();
+        assertThat(store.find("boundary", "/api/v1/returns")).isPresent();
+        assertThat(store.find("recent", "/api/v1/returns")).isPresent();
+        assertThat(service.create("boundary", body()).location()).isEqualTo(boundary.location());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(3);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_projection", Integer.class))
+                .isEqualTo(3);
+        assertThat(cleanupJob.cleanup()).isZero();
+    }
+
+    @Test
+    void concurrentRequestsAfterExpiryStillCreateOnlyOneNewReturn() throws Exception {
+        var old = service.create("key-1", body());
+        admin.update(
+                "UPDATE returns.idempotency_keys SET created_at = ?",
+                Timestamp.from(Instant.parse("2026-10-20T09:59:59Z")));
+        var results = concurrentRequests(body(), body());
+        assertThat(results).allSatisfy(result -> assertThat(result).isInstanceOf(ReturnCreationResponse.class));
+        var first = (ReturnCreationResponse) results.get(0);
+        var second = (ReturnCreationResponse) results.get(1);
+        assertThat(first.location()).isEqualTo(second.location()).isNotEqualTo(old.location());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.idempotency_keys", Integer.class))
+                .isEqualTo(1);
+    }
+
     @Configuration
     @EnableTransactionManagement
     @Import({
         PostgresEventStore.class,
         IdempotentReturnCreationService.class,
+        IdempotencyCleanupJob.class,
         ReturnCommandService.class,
         PostgresIdempotencyStore.class,
         PostgresBusinessNumberGenerator.class,

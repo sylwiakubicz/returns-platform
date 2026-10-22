@@ -1,8 +1,10 @@
 package dev.rma.returns.application;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.Objects;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,9 +28,19 @@ public class IdempotentReturnCreationService {
     private final IdempotencyStore store;
     private final ObjectMapper mapper;
     private final Clock clock;
+    private final Duration retention;
 
     public IdempotentReturnCreationService(
-            CreateReturnUseCase creator, IdempotencyStore store, ObjectMapper mapper, Clock clock) {
+            CreateReturnUseCase creator,
+            IdempotencyStore store,
+            ObjectMapper mapper,
+            Clock clock,
+            @Value("${returns.idempotency.retention:PT24H}") String retention) {
+        var duration = Duration.parse(retention);
+        if (duration.isNegative() || duration.isZero()) {
+            throw new IllegalArgumentException("Idempotency retention must be positive");
+        }
+        this.retention = duration;
         this.creator = creator;
         this.store = store;
         this.mapper = mapper;
@@ -43,6 +55,7 @@ public class IdempotentReturnCreationService {
         Objects.requireNonNull(body, "body must not be null");
         String hash = RequestBodyHasher.sha256(body);
         store.lock(key, ENDPOINT);
+        store.deleteExpired(key, ENDPOINT, clock.instant().minus(retention));
         var saved = store.find(key, ENDPOINT);
         if (saved.isPresent()) {
             if (!saved.get().requestHash().equals(hash)) {

@@ -2,6 +2,7 @@ package dev.rma.returns.adapter.out.persistence;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Optional;
 
 import org.springframework.dao.support.DataAccessUtils;
@@ -29,6 +30,25 @@ public class PostgresIdempotencyStore implements IdempotencyStore {
         String hash = RequestBodyHasher.sha256(resource.getBytes(StandardCharsets.UTF_8));
         long lockId = Long.parseUnsignedLong(hash.substring(0, 16), 16);
         jdbcTemplate.query("SELECT pg_advisory_xact_lock(?)", row -> {}, lockId);
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int deleteExpiredBefore(Instant before) {
+        return jdbcTemplate.update("DELETE FROM returns.idempotency_keys WHERE created_at < ?", Timestamp.from(before));
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public int deleteExpired(String key, String endpoint, Instant before) {
+        return jdbcTemplate.update(
+                """
+                DELETE FROM returns.idempotency_keys
+                WHERE idempotency_key = ? AND endpoint = ? AND created_at < ?
+                """,
+                key,
+                endpoint,
+                Timestamp.from(before));
     }
 
     @Override
