@@ -2,8 +2,9 @@
 
 Źródłem kontraktu jest `contracts/src/main/resources/openapi/returns-v1.yaml`.
 Specyfikacja opisuje docelowe endpointy kroku 6. Obecnie działają
-`POST /admin/projections/rebuild` i `POST /api/v1/returns`; pozostałe endpointy
-publiczne oraz symulacyjne pozostają do wykonania.
+`POST /admin/projections/rebuild`, `POST /api/v1/returns`,
+`GET /api/v1/returns` i `GET /api/v1/returns/{numer}`. Historia, anulowanie
+przez HTTP oraz endpointy symulacyjne pozostają do wykonania.
 
 ## Stan realizacji punktu 2 planu API
 
@@ -141,3 +142,18 @@ ProblemDetail dla błędnego wejścia (400), konfliktu klucza i odmowy domeny (4
 nieobsługiwanego typu treści (415), nieakceptowanej odpowiedzi (406) i błędu
 wewnętrznego (500). Katalog kodów znajduje się w docs/03-kontrakty.md.
 Wspólna obsługa wszystkich endpointów pozostaje do późniejszego uporządkowania.
+
+## Punkt 5 — partia 2: szczegóły i lista przez HTTP
+
+ReturnQueryController udostępnia GET /api/v1/returns/{numer} i GET /api/v1/returns.
+Numer w ścieżce musi mieć format RMA-RRRR-NNNNNN; inny format daje 400,
+nieistniejący poprawny numer daje 404 z kodem RETURN_NOT_FOUND.
+Domyślne parametry listy: page=0, size=20; maksymalny size to 100.
+Opcjonalny status przyjmuje dokładną nazwę stanu. Wyniki są uporządkowane po
+numerze biznesowym malejąco. Błędne parametry dają 400 z nazwą parametru w errors.
+Pusta strona lub brak wyników zgodnych z filtrem to 200, nie 404.
+
+ReturnResponse zapisuje kwotę jako tekst z dwoma miejscami po przecinku oraz
+walutę jako kod ISO. Brak decyzji refundacyjnej to null, a odmowa zwrotu może
+mieć kwotę "0.00". updatedAt pochodzi z bazy i jest datą ISO 8601,
+bez zastępowania jej bieżącym czasem.

@@ -11,13 +11,16 @@ import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
 import dev.rma.returns.application.exception.IdempotencyKeyReuseException;
 import dev.rma.returns.application.exception.InvalidReturnRequestException;
+import dev.rma.returns.application.exception.ReturnNotFoundException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
 /** Obsługa błędów tworzenia i protokołu HTTP; wspólne uporządkowanie w module common pozostaje do wykonania. */
@@ -30,6 +33,13 @@ public class ReturnApiExceptionHandler extends ResponseEntityExceptionHandler {
         var problem = problem(400, "INVALID_REQUEST", "Invalid request", exception.getMessage(), request);
         problem.setProperty("errors", List.of(Map.of("field", exception.field(), "message", exception.getMessage())));
         return response(problem, HttpHeaders.EMPTY);
+    }
+
+    @ExceptionHandler(ReturnNotFoundException.class)
+    public ResponseEntity<Object> notFound(ReturnNotFoundException exception, WebRequest request) {
+        return response(
+                problem(404, "RETURN_NOT_FOUND", "Return not found", exception.getMessage(), request),
+                HttpHeaders.EMPTY);
     }
 
     @ExceptionHandler(IdempotencyKeyReuseException.class)
@@ -48,7 +58,7 @@ public class ReturnApiExceptionHandler extends ResponseEntityExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> unexpectedFailure(Exception exception, WebRequest request) {
-        LOG.error("Unexpected return creation failure", exception);
+        LOG.error("Unexpected return API failure", exception);
         return response(
                 problem(500, "INTERNAL_ERROR", "Internal server error", "The request could not be completed", request),
                 HttpHeaders.EMPTY);
@@ -67,8 +77,12 @@ public class ReturnApiExceptionHandler extends ResponseEntityExceptionHandler {
         var problem =
                 problem(status.value(), code, "HTTP request error", "Check the request headers and body", request);
         if (status.value() == 400) {
+            String field = exception instanceof MethodArgumentTypeMismatchException mismatch
+                    ? mismatch.getName()
+                    : exception instanceof MissingRequestHeaderException missing ? missing.getHeaderName() : "$";
             problem.setProperty(
-                    "errors", List.of(Map.of("field", "$", "message", "Check required headers and request body")));
+                    "errors",
+                    List.of(Map.of("field", field, "message", "Check request parameters, required headers and body")));
         }
         return response(problem, headers);
     }

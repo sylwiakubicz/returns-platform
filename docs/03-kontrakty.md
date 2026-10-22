@@ -1,6 +1,7 @@
 # Kontrakty i błędy API
 
-Ten katalog obejmuje obecnie endpoint `POST /api/v1/returns`.
+Ten katalog obejmuje obecnie tworzenie zwrotu (POST) oraz odczyt szczegółów
+i listy (GET) pod /api/v1/returns.
 Błędy mają format RFC 9457 i typ treści `application/problem+json`.
 Pole `type` wskazuje odpowiednią sekcję tego dokumentu, a `instance` ścieżkę żądania.
 Pełne uporządkowanie błędów pozostałych endpointów i modułu common pozostaje do wykonania.
@@ -11,7 +12,17 @@ Kod: `INVALID_REQUEST`.
 
 HTTP 400. Brak wymaganego nagłówka lub ciała, błędny JSON albo niepoprawne pola.
 `errors` zawiera pole i komunikat. `$` oznacza całe ciało lub ogólny błąd żądania.
-Popraw dane przed ponowieniem. Nieudana operacja nie zajmuje klucza.
+Dla listy errors wskazuje parametr, np. page, size lub status; błędny numer
+zwrotu wskazuje businessNumber. Popraw dane przed ponowieniem.
+Nieudana operacja tworzenia nie zajmuje klucza.
+
+## Return not found
+
+Kod: `RETURN_NOT_FOUND`.
+
+HTTP 404. Nie znaleziono zwrotu o wskazanym numerze biznesowym w danych do odczytu.
+Sprawdź numer; po przyszłym wprowadzeniu asynchronicznych aktualizacji możliwe
+będzie krótkie opóźnienie widoczności nowo utworzonego zwrotu.
 
 ## Idempotency key reused
 

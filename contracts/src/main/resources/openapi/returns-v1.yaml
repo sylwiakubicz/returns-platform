@@ -88,6 +88,12 @@
                 "$ref": "#/components/schemas/ReturnPage"
         "400":
           "$ref": "#/components/responses/Error400"
+        "406":
+          "description": "The Accept header does not allow a JSON response."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "Zero-based pages. Stable order by business_number descending. Oversized pages are rejected with 400. Projection data can lag behind writes in future stages; each item exposes updatedAt."
@@ -135,6 +141,12 @@
           "$ref": "#/components/responses/Error400"
         "404":
           "$ref": "#/components/responses/Error404"
+        "406":
+          "description": "The Accept header does not allow a JSON response."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
   "/api/v1/returns/{businessNumber}/cancel":
