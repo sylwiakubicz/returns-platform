@@ -9,8 +9,4 @@ import dev.rma.returns.domain.enums.RmaStatus;
  * Wynik utworzenia lub odczytu zwrotu. refundAmount jest null do podjęcia decyzji
  * refundacyjnej; updatedAt to czas ostatniego uwzględnionego zdarzenia.
  */
-public record ReturnView(
-    String businessNumber,
-    RmaStatus status,
-    Money refundAmount,
-    Instant updatedAt) {}
+public record ReturnView(String businessNumber, RmaStatus status, Money refundAmount, Instant updatedAt) {}
