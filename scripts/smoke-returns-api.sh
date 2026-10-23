@@ -63,6 +63,15 @@ assert_json '.status == "REQUESTED" and .refundAmount == null and (.updatedAt | 
 request GET '/api/v1/returns?page=0&size=20&status=REQUESTED' 200
 assert_json '.page == 0 and .size == 20 and all(.content[]; .status == "REQUESTED")'
 
+request GET '/api/v1/returns?size=101' 400
+assert_json '.code == "INVALID_REQUEST" and (.errors | length > 0)'
+# Numer zarezerwowany poza sekwencją generatora (zaczyna się od 000001).
+request GET '/api/v1/returns/RMA-2026-000000' 404
+assert_json '.code == "RETURN_NOT_FOUND"'
+jq -n '{warehouseId:"warehouse-example"}' > "$work_dir/warehouse.json"
+request POST "/internal/sim/returns/$number/parcel-received" 409 "$work_dir/warehouse.json"
+assert_json '.code == "INVALID_STATE_TRANSITION"'
+
 jq -n --arg id "$run_key" '{labelId:$id, trackingNumber:$id, labelFileKey:("labels/"+$id+".pdf")}' > "$work_dir/label.json"
 simulate label-issued "$work_dir/label.json"
 jq -n --arg id "$run_key" '{pickupId:$id, scheduledFor:((now + 86400) | strftime("%Y-%m-%d"))}' > "$work_dir/pickup.json"

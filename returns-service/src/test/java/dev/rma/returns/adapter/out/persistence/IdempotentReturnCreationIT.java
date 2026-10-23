@@ -15,11 +15,15 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import javax.sql.DataSource;
 
@@ -79,8 +83,10 @@ import dev.rma.returns.application.exception.InvalidReturnRequestException;
 import dev.rma.returns.application.model.ReturnCreationResponse;
 import dev.rma.returns.application.port.out.EventStore;
 import dev.rma.returns.application.port.out.IdempotencyStore;
+import dev.rma.returns.application.port.out.StoredEvent;
 import dev.rma.returns.config.SimulationPolicyConfiguration;
 import dev.rma.returns.domain.InspectionResult;
+import dev.rma.returns.domain.Rma;
 import dev.rma.returns.domain.enums.FailureCode;
 import dev.rma.returns.domain.enums.ItemGrade;
 import dev.rma.returns.domain.events.DomainEvent;
@@ -875,6 +881,29 @@ class IdempotentReturnCreationIT {
                 .andExpect(jsonPath("$[6].payload.refundAmount.amount").value("85.00"))
                 .andExpect(jsonPath("$[7].payload.amount.currency").value("PLN"))
                 .andExpect(jsonPath("$[8].payload.closureReason").value("REFUND_COMPLETED"));
+        var historyResponse = mvc.perform(get("/api/v1/returns/RMA-2026-000001/history"))
+                .andExpect(status().isOk())
+                .andReturn()
+                .getResponse();
+        var history = mapper.readTree(historyResponse.getContentAsByteArray());
+        var eventIds = new java.util.HashSet<String>();
+        for (int i = 0; i < history.size(); i++) {
+            var entry = history.get(i);
+            assertThat(entry.path("version").asLong()).isEqualTo(i + 1);
+            assertThat(entry.path("schemaVersion").asInt()).isPositive();
+            assertThat(entry.path("occurredAt").asText()).isEqualTo("2026-10-21T10:00:00Z");
+            assertThat(entry.path("rmaId")).isEqualTo(entry.path("payload").path("rmaId"));
+            assertThat(UUID.fromString(entry.path("eventId").asText())).isNotNull();
+            eventIds.add(entry.path("eventId").asText());
+        }
+        assertThat(eventIds).hasSize(9);
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(JSON))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("REQUESTED"))
+                .andExpect(jsonPath("$.businessNumber").value("RMA-2026-000001"));
         inspect("close", "{\"closureReason\":\"REFUND_COMPLETED\"}").andExpect(status().isConflict());
     }
 
@@ -1009,6 +1038,230 @@ class IdempotentReturnCreationIT {
     private String refundBody(String amount, String currency) {
         return "{\"payoutId\":\"payout-1\",\"amount\":{\"amount\":\"" + amount + "\",\"currency\":\"" + currency
                 + "\"},\"attempt\":1}";
+    }
+
+    @Test
+    void httpPaginatesAndFiltersWithoutDuplicatesOrIncorrectTotals() throws Exception {
+        for (int i = 1; i <= 5; i++) {
+            mvc.perform(post("/api/v1/returns")
+                            .header("Idempotency-Key", "page-" + i)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(JSON))
+                    .andExpect(status().isCreated());
+        }
+        mvc.perform(post("/api/v1/returns/RMA-2026-000002/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cancelledBy\":\"customer\"}"))
+                .andExpect(status().isNoContent());
+        var numbers = new ArrayList<String>();
+        for (int page = 0; page < 3; page++) {
+            var response = mvc.perform(
+                            get("/api/v1/returns").param("page", "" + page).param("size", "2"))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.page").value(page))
+                    .andExpect(jsonPath("$.size").value(2))
+                    .andExpect(jsonPath("$.totalElements").value(5))
+                    .andExpect(jsonPath("$.totalPages").value(3))
+                    .andExpect(jsonPath("$.content.length()").value(page == 2 ? 1 : 2))
+                    .andReturn();
+            for (var entry : mapper.readTree(response.getResponse().getContentAsByteArray())
+                    .path("content")) {
+                numbers.add(entry.path("businessNumber").asText());
+                assertThat(entry.path("updatedAt").asText()).isEqualTo("2026-10-21T10:00:00Z");
+            }
+        }
+        assertThat(numbers)
+                .containsExactlyInAnyOrder(
+                        "RMA-2026-000001", "RMA-2026-000002", "RMA-2026-000003", "RMA-2026-000004", "RMA-2026-000005");
+        mvc.perform(get("/api/v1/returns").param("status", "CANCELLED").param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.content[0].businessNumber").value("RMA-2026-000002"));
+        mvc.perform(get("/api/v1/returns")
+                        .param("status", "REQUESTED")
+                        .param("page", "1")
+                        .param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(4))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.content[*].status")
+                        .value(org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.is("REQUESTED"))));
+        mvc.perform(get("/api/v1/returns").param("page", "3").param("size", "2"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(5));
+        mvc.perform(get("/api/v1/returns").param("status", "CLOSED"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.totalPages").value(0));
+        mvc.perform(get("/api/v1/returns"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(20));
+        mvc.perform(get("/api/v1/returns").param("size", "100"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.size").value(100));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"page=-1", "page=text", "size=0", "size=101", "size=text", "status=UNKNOWN"})
+    void httpRejectsInvalidPaginationAndFilters(String query) throws Exception {
+        mvc.perform(get("/api/v1/returns?" + query))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void httpReturns404ForMissingDetails() throws Exception {
+        mvc.perform(get("/api/v1/returns/RMA-2026-999999"))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.code").value("RETURN_NOT_FOUND"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void httpHandlesConcurrentIdempotency(boolean differentBody) throws Exception {
+        var start = new CountDownLatch(1);
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Callable<org.springframework.mock.web.MockHttpServletResponse> firstRequest = () -> {
+                assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
+                return mvc.perform(post("/api/v1/returns")
+                                .header("Idempotency-Key", "key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(JSON))
+                        .andReturn()
+                        .getResponse();
+            };
+            var first = executor.submit(firstRequest);
+            var second = executor.submit(() -> {
+                assertThat(start.await(10, TimeUnit.SECONDS)).isTrue();
+                return mvc.perform(post("/api/v1/returns")
+                                .header("Idempotency-Key", "key-1")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(differentBody ? JSON.replace("order-1", "order-2") : JSON))
+                        .andReturn()
+                        .getResponse();
+            });
+            new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                store.lock("key-1", "/api/v1/returns");
+                start.countDown();
+                awaitWaitingRequests(2);
+            });
+            var responses = List.of(first.get(10, TimeUnit.SECONDS), second.get(10, TimeUnit.SECONDS));
+            assertThat(responses)
+                    .extracting(response -> response.getStatus())
+                    .containsExactlyInAnyOrder(201, differentBody ? 422 : 201);
+            if (differentBody) {
+                var conflict = responses.stream()
+                        .filter(response -> response.getStatus() == 422)
+                        .findFirst()
+                        .orElseThrow();
+                assertThat(conflict.getContentType()).isEqualTo(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+                assertThat(mapper.readTree(conflict.getContentAsByteArray())
+                                .path("code")
+                                .asText())
+                        .isEqualTo("IDEMPOTENCY_KEY_REUSED");
+            } else {
+                assertThat(mapper.readTree(responses.get(0).getContentAsByteArray()))
+                        .isEqualTo(mapper.readTree(responses.get(1).getContentAsByteArray()));
+                assertThat(responses.get(0).getHeader("Location"))
+                        .isEqualTo(responses.get(1).getHeader("Location"));
+            }
+        }
+        assertSingleReturn();
+    }
+
+    @Test
+    void httpAllowsExactlyOneWriteWhenBothCommandsDecideOnSameVersion() throws Exception {
+        service.create("key", body());
+        simulate("RMA-2026-000001", "label-issued").andExpect(status().isNoContent());
+        var versions = new ConcurrentLinkedQueue<Long>();
+        var gatedStore = new DecisionBarrierStore(eventStore, new CountDownLatch(2), versions);
+        var shipmentService = new ShipmentSimulationService(
+                gatedStore,
+                new PostgresRmaIdLookup(jdbcTemplate),
+                Clock.fixed(Instant.parse("2026-10-21T10:00:00Z"), ZoneOffset.UTC));
+        // TransactionTemplate replaces only the Spring transaction proxy around the real use case.
+        var transactionalService =
+                new ShipmentSimulationService(
+                        gatedStore,
+                        new PostgresRmaIdLookup(jdbcTemplate),
+                        Clock.fixed(Instant.parse("2026-10-21T10:00:00Z"), ZoneOffset.UTC)) {
+                    @Override
+                    public void markInTransit(String number) {
+                        new TransactionTemplate(transactionManager)
+                                .executeWithoutResult(status -> shipmentService.markInTransit(number));
+                    }
+                };
+        var racingMvc = MockMvcBuilders.standaloneSetup(new ShipmentSimulationController(transactionalService, mapper))
+                .setControllerAdvice(exceptionHandler)
+                .build();
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Callable<org.springframework.mock.web.MockHttpServletResponse> command = () -> racingMvc
+                    .perform(post("/internal/sim/returns/RMA-2026-000001/parcel-in-transit"))
+                    .andReturn()
+                    .getResponse();
+            var first = executor.submit(command);
+            var second = executor.submit(command);
+            var responses = List.of(first.get(15, TimeUnit.SECONDS), second.get(15, TimeUnit.SECONDS));
+            assertThat(versions).containsExactly(2L, 2L);
+            assertThat(responses).extracting(response -> response.getStatus()).containsExactlyInAnyOrder(204, 409);
+            var conflict = responses.stream()
+                    .filter(response -> response.getStatus() == 409)
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(mapper.readTree(conflict.getContentAsByteArray())
+                            .path("code")
+                            .asText())
+                    .isEqualTo("CONCURRENCY_CONFLICT");
+        }
+        mvc.perform(get("/api/v1/returns/RMA-2026-000001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("IN_TRANSIT"));
+        mvc.perform(get("/api/v1/returns/RMA-2026-000001/history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(3))
+                .andExpect(jsonPath("$[*].version").value(org.hamcrest.Matchers.contains(1, 2, 3)))
+                .andExpect(jsonPath("$[2].type").value("ParcelInTransit"));
+    }
+
+    /** Wait after both domain decisions, before either real database append. No sleeps or production hooks. */
+    private record DecisionBarrierStore(EventStore delegate, CountDownLatch decisions, Queue<Long> versions)
+            implements EventStore {
+        @Override
+        public void append(UUID id, long expectedVersion, List<DomainEvent> events) {
+            versions.add(expectedVersion);
+            decisions.countDown();
+            try {
+                if (!decisions.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("Both commands must decide before writing");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(exception);
+            }
+            delegate.append(id, expectedVersion, events);
+        }
+
+        @Override
+        public Optional<Rma> load(UUID id) {
+            return delegate.load(id);
+        }
+
+        @Override
+        public Stream<StoredEvent> readFrom(UUID id, long version) {
+            return delegate.readFrom(id, version);
+        }
+
+        @Override
+        public Stream<StoredEvent> readAll() {
+            return delegate.readAll();
+        }
     }
 
     @Configuration

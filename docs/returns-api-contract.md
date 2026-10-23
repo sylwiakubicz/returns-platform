@@ -233,3 +233,52 @@ Testy HTTP przechodzą od utworzenia do CLOSED i sprawdzają pełną historię.
 Obejmują też potrącenia B/C, odrzucenie D, pełną kwotę przy DAMAGED_IN_TRANSIT,
 brak zgody przełożonego, niezgodną wypłatę oraz błędne dane i kolejność.
 Wszystkie symulacje nadal są deprecated i przewidziane do usunięcia w etapie 6.
+
+## Punkt 7 — bramka API
+
+`IdempotentReturnCreationIT` uruchamia kontrolery HTTP, rzeczywiste przypadki użycia
+oraz PostgreSQL na Testcontainers. Obejmuje ścieżkę do `CLOSED`, szczegóły i pełną
+historię (wersje, identyfikatory, schematy i czasy), paginację, filtry, błędy,
+odtworzenie odpowiedzi po zamknięciu oraz równoległą idempotencję.
+
+Test konfliktu wersji zatrzymuje dwa polecenia przed `append`, już po odczycie
+agregatu i decyzji domenowej. Oba zapisują z `expectedVersion=2`; rzeczywista baza
+przyjmuje dokładnie jeden zapis. API zwraca `204` i `409 CONCURRENCY_CONFLICT`,
+a historia zawiera jedno nowe zdarzenie. Bariera i ograniczone czasowo oczekiwania
+istnieją tylko w teście. Test nie polega na przypadkowej kolejności wątków.
+
+Sprawdzenie bramki (Java 21, Docker, Node.js):
+
+```bash
+make lint
+npx --yes @redocly/cli@2.63.0 lint --config redocly.yaml
+./mvnw verify
+```
+
+`verify` uruchamia również testy integracyjne `*IT` przez Failsafe; CI ich nie pomija.
+Dla Colimy przed testami ustaw:
+
+```bash
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+```
+
+Jeżeli lokalny Docker odrzuca domyślne API klienta komunikatem o zbyt starej wersji,
+można dla tego uruchomienia ustawić `JAVA_TOOL_OPTIONS=-Dapi.version=1.44`.
+
+Odtwarzalny scenariusz na uruchomionym serwisie:
+
+```bash
+make run
+# W drugim terminalu (wymagane curl i jq):
+bash scripts/smoke-returns-api.sh http://localhost:8080
+```
+
+Skrypt używa `examples/create-return.json`, aktualizuje datę dostarczenia w kopii
+roboczej i nadaje nowy klucz przy każdym uruchomieniu. Sprawdza utworzenie,
+idempotencję i konflikt treści klucza, wszystkie osiem operacji symulacyjnych
+(w tym opcjonalny odbiór), `CLOSED`, dziesięć zdarzeń historii oraz anulowanie
+osobnego zwrotu. Ponowne uruchomienie nie wymaga czyszczenia bazy.
+
+Pełny wspólny katalog błędów, podniesienie progu pokrycia i pozostały dług
+opisany w kroku 7 planu etapu 3 pozostają osobnym zadaniem.
