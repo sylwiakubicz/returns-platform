@@ -231,6 +231,12 @@
           "$ref": "#/components/responses/Error409"
         "422":
           "$ref": "#/components/responses/Error422"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "REQUESTED → LABEL_ISSUED. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
@@ -261,6 +267,12 @@
           "$ref": "#/components/responses/Error409"
         "422":
           "$ref": "#/components/responses/Error422"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "LABEL_ISSUED → PICKUP_SCHEDULED. Optional on the positive path. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
@@ -315,6 +327,12 @@
           "$ref": "#/components/responses/Error409"
         "422":
           "$ref": "#/components/responses/Error422"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "IN_TRANSIT → RECEIVED. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."

@@ -5,7 +5,9 @@ Specyfikacja opisuje docelowe endpointy kroku 6. Obecnie działają
 `POST /admin/projections/rebuild`, `POST /api/v1/returns`,
 `GET /api/v1/returns`, `GET /api/v1/returns/{numer}`,
 `GET /api/v1/returns/{numer}/history` i `POST /api/v1/returns/{numer}/cancel`.
-Endpointy symulacyjne pozostają do wykonania.
+Z symulacji działają label-issued, pickup-scheduled, parcel-in-transit oraz
+parcel-received. Inspekcja, refundacja i zamknięcie przez symulacje pozostają
+do wykonania.
 
 ## Stan realizacji punktu 2 planu API
 
@@ -29,7 +31,7 @@ mapowanie na payload i aktualny schemaVersion z OpenAPI pozostaje do wykonania.
 ReturnQueryService i PostgresRmaProjectionReader są zarejestrowane w Springu.
 Szczegóły i lista są odczytywane z PostgreSQL. Liczenie wyników i pobieranie strony
 działają w jednej transakcji tylko do odczytu, na poziomie REPEATABLE_READ,
-więc widzą ten sam stan danych pomimo równoczesnych zapisów. Endpointy symulacyjne nadal nie są zaimplementowane. Pełna ścieżka
+więc widzą ten sam stan danych pomimo równoczesnych zapisów. Pozostałe endpointy symulacyjne są wymienione w opisie postępu poniżej. Pełna ścieżka
 przez API pozostaje do wykonania.
 
 Punkt 4, partie 1–3: IdempotentReturnCreationService oblicza SHA-256 surowego
@@ -178,3 +180,27 @@ ReturnHistoryResponseMapper przygotowuje JSON tylko na potrzeby HTTP:
 kwoty są tekstem z walutą, daty są ISO 8601. Nie zmienia JSON zapisanych zdarzeń
 ani klas domenowych. Testy HTTP obejmują ponad 50 zdarzeń, istniejący snapshot,
 zdarzenie po snapshocie oraz odczyt przy pustej projekcji.
+
+## Punkt 5 — partia 4: symulowanie wysyłki i przyjęcia paczki
+
+Działają cztery tymczasowe operacje POST pod /internal/sim/returns/{numer}/:
+
+| Końcówka ścieżki | Ciało żądania | Wynikowy stan |
+| --- | --- | --- |
+| label-issued | labelId, trackingNumber, labelFileKey | LABEL_ISSUED |
+| pickup-scheduled | pickupId, scheduledFor (data ISO) | PICKUP_SCHEDULED |
+| parcel-in-transit | bez ciała | IN_TRANSIT |
+| parcel-received | warehouseId | RECEIVED |
+
+Sukces to 204. Zaplanowanie odbioru jest opcjonalne; transport można rozpocząć
+zarówno z LABEL_ISSUED, jak i PICKUP_SCHEDULED. Czasy zdarzeń nadaje zegar
+aplikacji, a dane klienta nie mogą ich zastąpić. scheduledFor jest planowaną datą
+odbioru, odrębną od czasu zapisania zdarzenia. Błędne dane dają 400, brak zwrotu
+404, niedozwolona kolejność lub ponowienie tej samej zmiany stanu 409.
+Operacje są transakcyjne i zachowują wersję sprzed polecenia przy zapisie zdarzenia.
+
+ShipmentSimulationController odczytuje i sprawdza żądania, a
+ShipmentSimulationService wywołuje istniejące metody Rma i zapisuje zdarzenia.
+Te ścieżki jedynie symulują fakty z integracji; nie generują etykiety ani nie
+zamawiają rzeczywistego transportu. Pozostają deprecated w OpenAPI i mają
+zostać usunięte w etapie 6 projektu.

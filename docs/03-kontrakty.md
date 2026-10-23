@@ -1,7 +1,8 @@
 # Kontrakty i błędy API
 
 Ten katalog obejmuje tworzenie i anulowanie zwrotu oraz odczyt szczegółów,
-listy i pełnej historii pod /api/v1/returns.
+listy i pełnej historii pod /api/v1/returns oraz symulacje wysyłki pod
+/internal/sim/returns/{numer}/.
 Błędy mają format RFC 9457 i typ treści `application/problem+json`.
 Pole `type` wskazuje odpowiednią sekcję tego dokumentu, a `instance` ścieżkę żądania.
 Pełne uporządkowanie błędów pozostałych endpointów i modułu common pozostaje do wykonania.
@@ -88,5 +89,6 @@ stan i oceń, czy nadal można wykonać polecenie, zanim je ponowisz.
 
 Kod: `INVALID_STATE_TRANSITION`.
 
-HTTP 409. Polecenie prowadzi do niedozwolonego przejścia stanu. Samo ponowienie
+HTTP 409. Polecenie prowadzi do niedozwolonego przejścia stanu, np. próba
+przyjęcia paczki przed rozpoczęciem transportu. Samo ponowienie
 bez zmiany stanu nie rozwiąże problemu.

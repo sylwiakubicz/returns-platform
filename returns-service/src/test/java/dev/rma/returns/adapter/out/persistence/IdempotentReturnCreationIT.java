@@ -27,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -44,6 +45,7 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
@@ -59,6 +61,7 @@ import dev.rma.returns.adapter.in.web.ReturnApiExceptionHandler;
 import dev.rma.returns.adapter.in.web.ReturnCreationController;
 import dev.rma.returns.adapter.in.web.ReturnHistoryResponseMapper;
 import dev.rma.returns.adapter.in.web.ReturnLifecycleController;
+import dev.rma.returns.adapter.in.web.ShipmentSimulationController;
 import dev.rma.returns.adapter.out.id.UuidV7RmaIdGenerator;
 import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
 import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
@@ -67,6 +70,7 @@ import dev.rma.returns.application.RebuildRmaProjectionService;
 import dev.rma.returns.application.ReturnCommandService;
 import dev.rma.returns.application.ReturnHistoryService;
 import dev.rma.returns.application.ReturnQueryService;
+import dev.rma.returns.application.ShipmentSimulationService;
 import dev.rma.returns.application.exception.IdempotencyKeyReuseException;
 import dev.rma.returns.application.exception.InvalidReturnRequestException;
 import dev.rma.returns.application.model.ReturnCreationResponse;
@@ -121,6 +125,9 @@ class IdempotentReturnCreationIT {
     @Autowired
     EventStore eventStore;
 
+    @Autowired
+    ShipmentSimulationController shipmentController;
+
     private MockMvc mvc;
 
     private static final String JSON =
@@ -136,7 +143,7 @@ class IdempotentReturnCreationIT {
 
     @BeforeEach
     void clearDatabase() {
-        mvc = MockMvcBuilders.standaloneSetup(controller, lifecycleController)
+        mvc = MockMvcBuilders.standaloneSetup(controller, lifecycleController, shipmentController)
                 .setControllerAdvice(exceptionHandler)
                 .build();
         admin.update("DELETE FROM returns.rma_snapshots");
@@ -697,6 +704,126 @@ class IdempotentReturnCreationIT {
         return rma;
     }
 
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void httpSimulatesShipmentWithOptionalPickupAndRecordsOrderedEvents(boolean pickup) throws Exception {
+        service.create("key", body());
+        simulate("RMA-2026-000001", "label-issued")
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM returns.rma_projection", String.class))
+                .isEqualTo("LABEL_ISSUED");
+        if (pickup) {
+            simulate("RMA-2026-000001", "pickup-scheduled").andExpect(status().isNoContent());
+            assertThat(jdbcTemplate.queryForObject("SELECT status FROM returns.rma_projection", String.class))
+                    .isEqualTo("PICKUP_SCHEDULED");
+        }
+        simulate("RMA-2026-000001", "parcel-in-transit").andExpect(status().isNoContent());
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM returns.rma_projection", String.class))
+                .isEqualTo("IN_TRANSIT");
+        simulate("RMA-2026-000001", "parcel-received").andExpect(status().isNoContent());
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM returns.rma_projection", String.class))
+                .isEqualTo("RECEIVED");
+        var result = mvc.perform(get("/api/v1/returns/RMA-2026-000001/history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(pickup ? 5 : 4))
+                .andExpect(jsonPath("$[1].payload.labelId").value("label-1"))
+                .andExpect(jsonPath("$[1].payload.trackingNumber").value("tracking-1"))
+                .andExpect(jsonPath("$[1].payload.labelFileKey").value("labels/label-1.pdf"))
+                .andReturn();
+        var history = mapper.readTree(result.getResponse().getContentAsByteArray());
+        for (int i = 0; i < history.size(); i++) {
+            assertThat(history.get(i).path("version").asInt()).isEqualTo(i + 1);
+            assertThat(history.get(i).path("occurredAt").asText()).isEqualTo("2026-10-21T10:00:00Z");
+        }
+        assertThat(history.get(history.size() - 1).path("type").asText()).isEqualTo("ParcelReceived");
+        assertThat(history.get(history.size() - 1)
+                        .path("payload")
+                        .path("warehouseId")
+                        .asText())
+                .isEqualTo("warehouse-1");
+        if (pickup) {
+            assertThat(history.get(2).path("payload").path("scheduledFor").asText())
+                    .isEqualTo("2026-10-22");
+        }
+    }
+
+    @Test
+    void httpRejectsOutOfOrderAndRepeatedShipmentOperationsWithoutAddingEvents() throws Exception {
+        service.create("key", body());
+        for (String operation : new String[] {"pickup-scheduled", "parcel-in-transit", "parcel-received"}) {
+            simulate("RMA-2026-000001", operation)
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("INVALID_STATE_TRANSITION"));
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(1);
+        simulate("RMA-2026-000001", "label-issued").andExpect(status().isNoContent());
+        simulate("RMA-2026-000001", "label-issued").andExpect(status().isConflict());
+        simulate("RMA-2026-000001", "parcel-received").andExpect(status().isConflict());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(2);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"label-issued", "pickup-scheduled", "parcel-in-transit", "parcel-received"})
+    void httpValidatesBusinessNumberAndMissingReturnForShipmentOperations(String operation) throws Exception {
+        simulate("RMA-2026-999999", operation)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RETURN_NOT_FOUND"));
+        simulate("not-a-business-number", operation)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("businessNumber"));
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            value = {
+                "label-issued|{}",
+                "label-issued|{\"labelId\":12,\"trackingNumber\":\"t\",\"labelFileKey\":\"f\"}",
+                "label-issued|{\"labelId\":\"l\",\"trackingNumber\":\"t\",\"labelFileKey\":\"f\",\"issuedAt\":\"2026-10-01T00:00:00Z\"}",
+                "pickup-scheduled|{\"pickupId\":\"p\",\"scheduledFor\":\"not-a-date\"}",
+                "pickup-scheduled|{\"pickupId\":\"p\"}",
+                "parcel-received|{\"warehouseId\":\" \"}",
+                "parcel-received|null",
+                "parcel-received|{invalid"
+            },
+            delimiter = '|')
+    void httpRejectsInvalidShipmentBodies(String operation, String body) throws Exception {
+        service.create("key", body());
+        mvc.perform(post("/internal/sim/returns/RMA-2026-000001/" + operation)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void httpRequiresJsonForShipmentData() throws Exception {
+        mvc.perform(post("/internal/sim/returns/RMA-2026-000001/label-issued")
+                        .contentType(MediaType.TEXT_PLAIN)
+                        .content("label"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.code").value("UNSUPPORTED_MEDIA_TYPE"));
+    }
+
+    private ResultActions simulate(String number, String operation) throws Exception {
+        var request = post("/internal/sim/returns/" + number + "/" + operation);
+        String body =
+                switch (operation) {
+                    case "label-issued" -> "{\"labelId\":\"label-1\",\"trackingNumber\":\"tracking-1\",\"labelFileKey\":\"labels/label-1.pdf\"}";
+                    case "pickup-scheduled" -> "{\"pickupId\":\"pickup-1\",\"scheduledFor\":\"2026-10-22\"}";
+                    case "parcel-received" -> "{\"warehouseId\":\"warehouse-1\"}";
+                    default -> null;
+                };
+        if (body != null) {
+            request.contentType(MediaType.APPLICATION_JSON).content(body);
+        }
+        return mvc.perform(request);
+    }
+
     @Configuration
     @EnableTransactionManagement
     @Import({
@@ -704,6 +831,8 @@ class IdempotentReturnCreationIT {
         IdempotentReturnCreationService.class,
         ReturnCreationController.class,
         ReturnLifecycleController.class,
+        ShipmentSimulationController.class,
+        ShipmentSimulationService.class,
         ReturnHistoryResponseMapper.class,
         ReturnApiExceptionHandler.class,
         IdempotencyCleanupJob.class,
