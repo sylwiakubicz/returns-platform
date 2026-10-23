@@ -21,6 +21,7 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.application.exception.IdempotencyKeyReuseException;
 import dev.rma.returns.application.exception.InvalidReturnRequestException;
+import dev.rma.returns.application.exception.InvalidSimulationCommandException;
 import dev.rma.returns.application.exception.ReturnNotFoundException;
 import dev.rma.returns.domain.enums.RmaErrorCode;
 import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
@@ -61,6 +62,13 @@ public class ReturnApiExceptionHandler extends ResponseEntityExceptionHandler {
                         "Return command rejected",
                         exception.getMessage(),
                         request),
+                HttpHeaders.EMPTY);
+    }
+
+    @ExceptionHandler(InvalidSimulationCommandException.class)
+    public ResponseEntity<Object> invalidSimulation(InvalidSimulationCommandException exception, WebRequest request) {
+        return response(
+                problem(422, "SIMULATION_COMMAND_REJECTED", "Simulation rejected", exception.getMessage(), request),
                 HttpHeaders.EMPTY);
     }
 

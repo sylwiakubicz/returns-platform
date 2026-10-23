@@ -1,7 +1,7 @@
 # Kontrakty i błędy API
 
 Ten katalog obejmuje tworzenie i anulowanie zwrotu oraz odczyt szczegółów,
-listy i pełnej historii pod /api/v1/returns oraz symulacje wysyłki pod
+listy i pełnej historii pod /api/v1/returns oraz symulacje wysyłki, inspekcji, refundacji i zamknięcia pod
 /internal/sim/returns/{numer}/.
 Błędy mają format RFC 9457 i typ treści `application/problem+json`.
 Pole `type` wskazuje odpowiednią sekcję tego dokumentu, a `instance` ścieżkę żądania.
@@ -92,3 +92,24 @@ Kod: `INVALID_STATE_TRANSITION`.
 HTTP 409. Polecenie prowadzi do niedozwolonego przejścia stanu, np. próba
 przyjęcia paczki przed rozpoczęciem transportu. Samo ponowienie
 bez zmiany stanu nie rozwiąże problemu.
+
+## Simulation command rejected
+
+Kod: `SIMULATION_COMMAND_REJECTED`.
+
+HTTP 422. Kwota lub waluta wykonanej refundacji nie zgadza się z decyzją albo
+przyczyna zamknięcia nie odpowiada stanowi. Popraw polecenie; zwrot nie został zmieniony.
+
+## Supervisor approval required
+
+Kod: `SUPERVISOR_APPROVAL_REQUIRED`.
+
+HTTP 422. Ocena D dla pozycji powyżej skonfigurowanego progu wymaga approvedBy.
+Oba zdarzenia zakończenia inspekcji pozostają niezapisane do czasu poprawnego polecenia.
+
+## Incomplete inspection
+
+Kod: `INCOMPLETE_INSPECTION`.
+
+HTTP 422. Wyniki inspekcji nie obejmują prawidłowo wszystkich pozycji zwrotu.
+Popraw wyniki przed ponowieniem; nie zapisano częściowego wyniku inspekcji.

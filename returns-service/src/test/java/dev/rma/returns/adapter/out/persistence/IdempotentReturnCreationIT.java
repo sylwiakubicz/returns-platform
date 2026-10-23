@@ -57,15 +57,18 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.rma.returns.adapter.in.scheduling.IdempotencyCleanupJob;
+import dev.rma.returns.adapter.in.web.InspectionRefundSimulationController;
 import dev.rma.returns.adapter.in.web.ReturnApiExceptionHandler;
 import dev.rma.returns.adapter.in.web.ReturnCreationController;
 import dev.rma.returns.adapter.in.web.ReturnHistoryResponseMapper;
 import dev.rma.returns.adapter.in.web.ReturnLifecycleController;
+import dev.rma.returns.adapter.in.web.ReturnQueryController;
 import dev.rma.returns.adapter.in.web.ShipmentSimulationController;
 import dev.rma.returns.adapter.out.id.UuidV7RmaIdGenerator;
 import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
 import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
 import dev.rma.returns.application.IdempotentReturnCreationService;
+import dev.rma.returns.application.InspectionRefundSimulationService;
 import dev.rma.returns.application.RebuildRmaProjectionService;
 import dev.rma.returns.application.ReturnCommandService;
 import dev.rma.returns.application.ReturnHistoryService;
@@ -76,6 +79,7 @@ import dev.rma.returns.application.exception.InvalidReturnRequestException;
 import dev.rma.returns.application.model.ReturnCreationResponse;
 import dev.rma.returns.application.port.out.EventStore;
 import dev.rma.returns.application.port.out.IdempotencyStore;
+import dev.rma.returns.config.SimulationPolicyConfiguration;
 import dev.rma.returns.domain.InspectionResult;
 import dev.rma.returns.domain.enums.FailureCode;
 import dev.rma.returns.domain.enums.ItemGrade;
@@ -86,7 +90,15 @@ import dev.rma.returns.domain.policy.RefundPolicy;
 
 @Testcontainers
 @SpringJUnitConfig(IdempotentReturnCreationIT.TestConfig.class)
-@TestPropertySource(properties = "returns.window-days=14")
+@TestPropertySource(
+        properties = {
+            "returns.window-days=14",
+            "returns.return-shipping-fee=15.00",
+            "returns.deduction.grade-a-percent=0",
+            "returns.deduction.grade-b-percent=15",
+            "returns.deduction.grade-c-percent=40",
+            "inspection.supervisor-approval-threshold=500.00"
+        })
 class IdempotentReturnCreationIT {
     @Container
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
@@ -128,6 +140,12 @@ class IdempotentReturnCreationIT {
     @Autowired
     ShipmentSimulationController shipmentController;
 
+    @Autowired
+    InspectionRefundSimulationController inspectionController;
+
+    @Autowired
+    ReturnQueryController queryController;
+
     private MockMvc mvc;
 
     private static final String JSON =
@@ -143,7 +161,8 @@ class IdempotentReturnCreationIT {
 
     @BeforeEach
     void clearDatabase() {
-        mvc = MockMvcBuilders.standaloneSetup(controller, lifecycleController, shipmentController)
+        mvc = MockMvcBuilders.standaloneSetup(
+                        controller, lifecycleController, shipmentController, inspectionController, queryController)
                 .setControllerAdvice(exceptionHandler)
                 .build();
         admin.update("DELETE FROM returns.rma_snapshots");
@@ -824,6 +843,174 @@ class IdempotentReturnCreationIT {
         return mvc.perform(request);
     }
 
+    @Test
+    void httpCompletesPositivePathFromCreationToClosedAndFullHistory() throws Exception {
+        receiveAndStartInspection(JSON);
+        inspect("inspection-completed", completeBody("A", null)).andExpect(status().isNoContent());
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM returns.rma_projection", String.class))
+                .isEqualTo("REFUND_PENDING");
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(7);
+        inspect("refund-executed", refundBody("85.00", "PLN")).andExpect(status().isNoContent());
+        inspect("close", "{\"closureReason\":\"REFUND_COMPLETED\"}").andExpect(status().isNoContent());
+        mvc.perform(get("/api/v1/returns/RMA-2026-000001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CLOSED"))
+                .andExpect(jsonPath("$.refundAmount.amount").value("85.00"));
+        mvc.perform(get("/api/v1/returns/RMA-2026-000001/history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(9))
+                .andExpect(jsonPath("$[*].type")
+                        .value(org.hamcrest.Matchers.contains(
+                                "RmaRequested",
+                                "LabelIssued",
+                                "ParcelInTransit",
+                                "ParcelReceived",
+                                "InspectionStarted",
+                                "InspectionCompleted",
+                                "RefundDecided",
+                                "RefundExecuted",
+                                "RmaClosed")))
+                .andExpect(jsonPath("$[5].payload.inspectorId").value("inspector-1"))
+                .andExpect(jsonPath("$[6].payload.refundAmount.amount").value("85.00"))
+                .andExpect(jsonPath("$[7].payload.amount.currency").value("PLN"))
+                .andExpect(jsonPath("$[8].payload.closureReason").value("REFUND_COMPLETED"));
+        inspect("close", "{\"closureReason\":\"REFUND_COMPLETED\"}").andExpect(status().isConflict());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"B,70.00,REFUND_PENDING", "C,45.00,REFUND_PENDING", "D,0.00,REJECTED"})
+    void httpUsesConfiguredDeductionsAndCanCloseRejectedReturn(String grade, String amount, String state)
+            throws Exception {
+        receiveAndStartInspection(JSON);
+        inspect("inspection-completed", completeBody(grade, null)).andExpect(status().isNoContent());
+        mvc.perform(get("/api/v1/returns/RMA-2026-000001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(state))
+                .andExpect(jsonPath("$.refundAmount.amount").value(amount));
+        if (grade.equals("D")) {
+            inspect("refund-executed", refundBody("0.00", "PLN")).andExpect(status().isConflict());
+            inspect("close", "{\"closureReason\":\"REJECTED_AFTER_INSPECTION\"}")
+                    .andExpect(status().isNoContent());
+        }
+    }
+
+    @Test
+    void httpRefundsFullItemValueForTransitDamageDespiteGradeC() throws Exception {
+        receiveAndStartInspection(JSON.replace("CHANGED_MIND", "DAMAGED_IN_TRANSIT"));
+        inspect("inspection-completed", completeBody("C", null)).andExpect(status().isNoContent());
+        mvc.perform(get("/api/v1/returns/RMA-2026-000001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.refundAmount.amount").value("100.00"));
+    }
+
+    @Test
+    void httpRequiresApprovalAboveConfiguredThresholdAndWritesInspectionAtomically() throws Exception {
+        receiveAndStartInspection(JSON.replace("100.00", "1000.00"));
+        inspect("inspection-completed", completeBody("D", null))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SUPERVISOR_APPROVAL_REQUIRED"));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(5);
+        inspect("inspection-completed", completeBody("D", "supervisor-1")).andExpect(status().isNoContent());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(7);
+    }
+
+    @Test
+    void httpRejectsMismatchedRefundAndClosureReasonWithoutWritingEvents() throws Exception {
+        receiveAndStartInspection(JSON);
+        inspect("inspection-completed", completeBody("A", null)).andExpect(status().isNoContent());
+        inspect("refund-executed", refundBody("1.00", "PLN"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("SIMULATION_COMMAND_REJECTED"));
+        inspect("refund-executed", refundBody("85.00", "EUR")).andExpect(status().isUnprocessableEntity());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(7);
+        inspect("refund-executed", refundBody("85.00", "PLN")).andExpect(status().isNoContent());
+        inspect("close", "{\"closureReason\":\"CANCELLED_BY_CUSTOMER\"}").andExpect(status().isUnprocessableEntity());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(8);
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM returns.rma_projection", String.class))
+                .isEqualTo("REFUNDED");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"inspection-started", "inspection-completed", "refund-executed", "close"})
+    void httpChecksInspectionSimulationNumbersMissingReturnsAndStateOrder(String operation) throws Exception {
+        String body =
+                switch (operation) {
+                    case "inspection-started" -> "{\"inspectorId\":\"inspector-1\"}";
+                    case "inspection-completed" -> completeBody("A", null);
+                    case "refund-executed" -> refundBody("85.00", "PLN");
+                    default -> "{\"closureReason\":\"REFUND_COMPLETED\"}";
+                };
+        mvc.perform(post("/internal/sim/returns/RMA-2026-999999/" + operation)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/internal/sim/returns/invalid/" + operation)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
+        service.create("key", body());
+        inspect(operation, body)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("INVALID_STATE_TRANSITION"));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @CsvSource(
+            value = {
+                "inspection-started|{}",
+                "inspection-completed|{\"inspectorId\":\"i\",\"results\":[]}",
+                "inspection-completed|{\"inspectorId\":\"i\",\"results\":[{\"itemId\":\"item-1\",\"grade\":\"Z\"}]}",
+                "inspection-completed|{\"inspectorId\":\"i\",\"results\":[{\"itemId\":\"item-1\",\"grade\":\"A\",\"photoKeys\":[42]}]}",
+                "refund-executed|{\"payoutId\":\"p\",\"amount\":{\"amount\":\"85.00\",\"currency\":\"PLN\"},\"attempt\":1.5}",
+                "refund-executed|{\"payoutId\":\"p\",\"amount\":{\"amount\":85,\"currency\":\"PLN\"},\"attempt\":1}",
+                "close|{\"closureReason\":\"UNKNOWN\"}",
+                "close|{\"closureReason\":\"REFUND_COMPLETED\",\"closedAt\":\"2020-01-01T00:00:00Z\"}"
+            },
+            delimiter = '|')
+    void httpRejectsMalformedInspectionAndRefundBodies(String operation, String body) throws Exception {
+        service.create("key", body());
+        inspect(operation, body)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(1);
+    }
+
+    private void receiveAndStartInspection(String json) throws Exception {
+        mvc.perform(post("/api/v1/returns")
+                        .header("Idempotency-Key", "key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isCreated());
+        simulate("RMA-2026-000001", "label-issued").andExpect(status().isNoContent());
+        simulate("RMA-2026-000001", "parcel-in-transit").andExpect(status().isNoContent());
+        simulate("RMA-2026-000001", "parcel-received").andExpect(status().isNoContent());
+        inspect("inspection-started", "{\"inspectorId\":\"inspector-1\"}").andExpect(status().isNoContent());
+    }
+
+    private ResultActions inspect(String operation, String body) throws Exception {
+        return mvc.perform(post("/internal/sim/returns/RMA-2026-000001/" + operation)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
+    }
+
+    private String completeBody(String grade, String approvedBy) {
+        return "{\"inspectorId\":\"inspector-1\",\"results\":[{\"itemId\":\"item-1\",\"grade\":\"" + grade + "\"}]"
+                + (approvedBy == null ? "" : ",\"approvedBy\":\"" + approvedBy + "\"") + "}";
+    }
+
+    private String refundBody(String amount, String currency) {
+        return "{\"payoutId\":\"payout-1\",\"amount\":{\"amount\":\"" + amount + "\",\"currency\":\"" + currency
+                + "\"},\"attempt\":1}";
+    }
+
     @Configuration
     @EnableTransactionManagement
     @Import({
@@ -833,6 +1020,10 @@ class IdempotentReturnCreationIT {
         ReturnLifecycleController.class,
         ShipmentSimulationController.class,
         ShipmentSimulationService.class,
+        InspectionRefundSimulationController.class,
+        InspectionRefundSimulationService.class,
+        SimulationPolicyConfiguration.class,
+        ReturnQueryController.class,
         ReturnHistoryResponseMapper.class,
         ReturnApiExceptionHandler.class,
         IdempotencyCleanupJob.class,

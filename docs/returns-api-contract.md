@@ -5,9 +5,8 @@ Specyfikacja opisuje docelowe endpointy kroku 6. Obecnie działają
 `POST /admin/projections/rebuild`, `POST /api/v1/returns`,
 `GET /api/v1/returns`, `GET /api/v1/returns/{numer}`,
 `GET /api/v1/returns/{numer}/history` i `POST /api/v1/returns/{numer}/cancel`.
-Z symulacji działają label-issued, pickup-scheduled, parcel-in-transit oraz
-parcel-received. Inspekcja, refundacja i zamknięcie przez symulacje pozostają
-do wykonania.
+Działają również wszystkie osiem zaplanowanych operacji symulacyjnych: wysyłka,
+przyjęcie paczki, inspekcja, wykonanie refundacji i zamknięcie zwrotu.
 
 ## Stan realizacji punktu 2 planu API
 
@@ -204,3 +203,33 @@ ShipmentSimulationService wywołuje istniejące metody Rma i zapisuje zdarzenia.
 Te ścieżki jedynie symulują fakty z integracji; nie generują etykiety ani nie
 zamawiają rzeczywistego transportu. Pozostają deprecated w OpenAPI i mają
 zostać usunięte w etapie 6 projektu.
+
+## Punkt 5 — partia 5: inspekcja, refundacja i zamknięcie
+
+Działają kolejne tymczasowe operacje POST pod /internal/sim/returns/{numer}/:
+
+| Końcówka | Dane JSON | Wynik |
+| --- | --- | --- |
+| inspection-started | inspectorId | UNDER_INSPECTION |
+| inspection-completed | inspectorId, results, opcjonalnie approvedBy | REFUND_PENDING lub REJECTED |
+| refund-executed | payoutId, amount (kwota i waluta), attempt | REFUNDED |
+| close | closureReason | CLOSED |
+
+Sukces to 204. Zakończenie inspekcji zapisuje InspectionCompleted i RefundDecided
+w jednej transakcji. Wynik i kwotę wylicza Rma na podstawie powodów zwrotu,
+ocen pozycji oraz skonfigurowanych potrąceń i opłaty za wysyłkę. Nie przyjmujemy
+od klienta wyliczonej decyzji. SimulationPolicyConfiguration podłącza istniejące
+ustawienia returns.return-shipping-fee, returns.deduction.* oraz
+inspection.supervisor-approval-threshold do zasad obliczeń.
+
+Reguły wymagają wyników dla wszystkich pozycji oraz zgody przełożonego dla
+oceny D powyżej progu wartości. W symulacji approvedBy jest podanym identyfikatorem,
+a sprawdzanie uprawnień należy do etapu 4. Refundacja musi mieć kwotę i walutę
+zgodne z decyzją, a przyczyna zamknięcia musi odpowiadać stanowi zwrotu.
+Niedozwolony stan daje 409; niezgodna kwota/waluta lub przyczyna zamknięcia daje
+422 z kodem SIMULATION_COMMAND_REJECTED. Błędy nie dopisują zdarzeń.
+
+Testy HTTP przechodzą od utworzenia do CLOSED i sprawdzają pełną historię.
+Obejmują też potrącenia B/C, odrzucenie D, pełną kwotę przy DAMAGED_IN_TRANSIT,
+brak zgody przełożonego, niezgodną wypłatę oraz błędne dane i kolejność.
+Wszystkie symulacje nadal są deprecated i przewidziane do usunięcia w etapie 6.

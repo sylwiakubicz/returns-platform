@@ -363,6 +363,12 @@
           "$ref": "#/components/responses/Error409"
         "422":
           "$ref": "#/components/responses/Error422"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "RECEIVED → UNDER_INSPECTION. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
@@ -393,6 +399,12 @@
           "$ref": "#/components/responses/Error409"
         "422":
           "$ref": "#/components/responses/Error422"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "Records InspectionCompleted and RefundDecided atomically. Results must cover every item exactly once. Supervisor approval is required for grade D above the configured threshold. UNDER_INSPECTION → REFUND_PENDING or REJECTED. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
@@ -423,6 +435,12 @@
           "$ref": "#/components/responses/Error409"
         "422":
           "$ref": "#/components/responses/Error422"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "REFUND_PENDING → REFUNDED. Amount and currency must match the refund decision. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
@@ -453,6 +471,12 @@
           "$ref": "#/components/responses/Error409"
         "422":
           "$ref": "#/components/responses/Error422"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "Records RmaClosed. Closure reason must match the terminal state; REFUNDED uses REFUND_COMPLETED. → CLOSED. Event times are assigned by the server. Temporary simulation endpoint, removed in project stage 6 when service integrations replace it."
