@@ -18,9 +18,12 @@ import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import dev.rma.returns.application.exception.ConcurrencyConflictException;
 import dev.rma.returns.application.exception.IdempotencyKeyReuseException;
 import dev.rma.returns.application.exception.InvalidReturnRequestException;
 import dev.rma.returns.application.exception.ReturnNotFoundException;
+import dev.rma.returns.domain.enums.RmaErrorCode;
+import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
 /** Obsługa błędów tworzenia i protokołu HTTP; wspólne uporządkowanie w module common pozostaje do wykonania. */
@@ -52,7 +55,31 @@ public class ReturnApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(RmaDomainException.class)
     public ResponseEntity<Object> domainFailure(RmaDomainException exception, WebRequest request) {
         return response(
-                problem(422, exception.code().name(), "Return rejected", exception.getMessage(), request),
+                problem(
+                        exception.code() == RmaErrorCode.CANCELLATION_NOT_ALLOWED ? 409 : 422,
+                        exception.code().name(),
+                        "Return command rejected",
+                        exception.getMessage(),
+                        request),
+                HttpHeaders.EMPTY);
+    }
+
+    @ExceptionHandler(ConcurrencyConflictException.class)
+    public ResponseEntity<Object> concurrencyConflict(ConcurrencyConflictException exception, WebRequest request) {
+        return response(
+                problem(
+                        409,
+                        "CONCURRENCY_CONFLICT",
+                        "Return changed",
+                        "The return was changed by another request; read its current state before retrying",
+                        request),
+                HttpHeaders.EMPTY);
+    }
+
+    @ExceptionHandler(InvalidRmaStateTransitionException.class)
+    public ResponseEntity<Object> invalidTransition(InvalidRmaStateTransitionException exception, WebRequest request) {
+        return response(
+                problem(409, "INVALID_STATE_TRANSITION", "Invalid state transition", exception.getMessage(), request),
                 HttpHeaders.EMPTY);
     }
 

@@ -167,6 +167,12 @@
           "$ref": "#/components/responses/Error404"
         "409":
           "$ref": "#/components/responses/Error409"
+        "415":
+          "description": "Content-Type must be application/json."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "Allowed in REQUESTED, LABEL_ISSUED and PICKUP_SCHEDULED. Records RmaCancelled and leaves the return in CANCELLED; closure is a separate command. cancelledBy is supplied explicitly until authentication is introduced in stage 4. Cancellation time is server-assigned."
@@ -196,6 +202,12 @@
           "$ref": "#/components/responses/Error400"
         "404":
           "$ref": "#/components/responses/Error404"
+        "406":
+          "description": "The Accept header does not allow a JSON response."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
         "500":
           "$ref": "#/components/responses/Error500"
       "description": "Reads the event store, not the projection or snapshots. Payloads are upcast to the current schema; schemaVersion describes the returned payload version. Event IDs, aggregate versions and occurrence times remain unchanged."

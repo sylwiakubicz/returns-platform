@@ -92,6 +92,7 @@ public class EventJsonMapper implements StoredEventDecoder {
         };
     }
 
+    @Override
     public int schemaVersionOf(DomainEvent event) {
         Objects.requireNonNull(event, "event must not be null");
         return currentSchemaVersion(event.getClass());

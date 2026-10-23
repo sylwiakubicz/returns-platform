@@ -3,8 +3,9 @@
 Źródłem kontraktu jest `contracts/src/main/resources/openapi/returns-v1.yaml`.
 Specyfikacja opisuje docelowe endpointy kroku 6. Obecnie działają
 `POST /admin/projections/rebuild`, `POST /api/v1/returns`,
-`GET /api/v1/returns` i `GET /api/v1/returns/{numer}`. Historia, anulowanie
-przez HTTP oraz endpointy symulacyjne pozostają do wykonania.
+`GET /api/v1/returns`, `GET /api/v1/returns/{numer}`,
+`GET /api/v1/returns/{numer}/history` i `POST /api/v1/returns/{numer}/cancel`.
+Endpointy symulacyjne pozostają do wykonania.
 
 ## Stan realizacji punktu 2 planu API
 
@@ -28,8 +29,7 @@ mapowanie na payload i aktualny schemaVersion z OpenAPI pozostaje do wykonania.
 ReturnQueryService i PostgresRmaProjectionReader są zarejestrowane w Springu.
 Szczegóły i lista są odczytywane z PostgreSQL. Liczenie wyników i pobieranie strony
 działają w jednej transakcji tylko do odczytu, na poziomie REPEATABLE_READ,
-więc widzą ten sam stan danych pomimo równoczesnych zapisów. Pozostałe kontrolery
-publiczne i endpointy symulacyjne nadal nie są zaimplementowane. Pełna ścieżka
+więc widzą ten sam stan danych pomimo równoczesnych zapisów. Endpointy symulacyjne nadal nie są zaimplementowane. Pełna ścieżka
 przez API pozostaje do wykonania.
 
 Punkt 4, partie 1–3: IdempotentReturnCreationService oblicza SHA-256 surowego
@@ -157,3 +157,24 @@ ReturnResponse zapisuje kwotę jako tekst z dwoma miejscami po przecinku oraz
 walutę jako kod ISO. Brak decyzji refundacyjnej to null, a odmowa zwrotu może
 mieć kwotę "0.00". updatedAt pochodzi z bazy i jest datą ISO 8601,
 bez zastępowania jej bieżącym czasem.
+
+## Punkt 5 — partia 3: anulowanie i historia przez HTTP
+
+POST /api/v1/returns/{numer}/cancel wymaga JSON z niepustym cancelledBy;
+reason jest opcjonalnym tekstem lub null. Sukces to 204 bez ciała. Powstaje
+RmaCancelled, a zwrot pozostaje w CANCELLED; nie zamykamy go automatycznie.
+Tożsamość jest polem wejściowym do czasu uwierzytelniania w etapie 4.
+Brak zwrotu daje 404, niepoprawne dane 400, odmowa anulowania lub konflikt
+wersji 409. Nieudane polecenie nie dopisuje zdarzenia.
+
+GET /api/v1/returns/{numer}/history zwraca całą tablicę zdarzeń według wersji,
+także sprzed snapshotu i niezależnie od obecności projekcji. Każdy wpis ma
+eventId, rmaId, version, type, schemaVersion, occurredAt i payload.
+schemaVersion opisuje aktualny format payloadu po upcastingu; nie jest wersją
+agregatu ani koniecznie wersją pierwotnego zapisu. Źródło wersji formatu jest
+wspólne z istniejącym mechanizmem kodowania zdarzeń.
+
+ReturnHistoryResponseMapper przygotowuje JSON tylko na potrzeby HTTP:
+kwoty są tekstem z walutą, daty są ISO 8601. Nie zmienia JSON zapisanych zdarzeń
+ani klas domenowych. Testy HTTP obejmują ponad 50 zdarzeń, istniejący snapshot,
+zdarzenie po snapshocie oraz odczyt przy pustej projekcji.

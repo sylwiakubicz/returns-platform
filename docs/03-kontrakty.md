@@ -1,7 +1,7 @@
 # Kontrakty i błędy API
 
-Ten katalog obejmuje obecnie tworzenie zwrotu (POST) oraz odczyt szczegółów
-i listy (GET) pod /api/v1/returns.
+Ten katalog obejmuje tworzenie i anulowanie zwrotu oraz odczyt szczegółów,
+listy i pełnej historii pod /api/v1/returns.
 Błędy mają format RFC 9457 i typ treści `application/problem+json`.
 Pole `type` wskazuje odpowiednią sekcję tego dokumentu, a `instance` ścieżkę żądania.
 Pełne uporządkowanie błędów pozostałych endpointów i modułu common pozostaje do wykonania.
@@ -20,7 +20,7 @@ Nieudana operacja tworzenia nie zajmuje klucza.
 
 Kod: `RETURN_NOT_FOUND`.
 
-HTTP 404. Nie znaleziono zwrotu o wskazanym numerze biznesowym w danych do odczytu.
+HTTP 404. Nie znaleziono zwrotu o wskazanym numerze biznesowym.
 Sprawdź numer; po przyszłym wprowadzeniu asynchronicznych aktualizacji możliwe
 będzie krótkie opóźnienie widoczności nowo utworzonego zwrotu.
 
@@ -69,3 +69,24 @@ Kod: `INTERNAL_ERROR`.
 HTTP 500. Nieoczekiwany błąd serwera. Można ponowić żądanie z tym samym kluczem
 oraz dokładnie tym samym ciałem. Transakcja nie zapisuje częściowego zwrotu.
 Szczegóły techniczne pozostają w logach serwera i nie są zwracane klientowi.
+
+## Cancellation not allowed
+
+Kod: `CANCELLATION_NOT_ALLOWED`.
+
+HTTP 409. Anulowanie jest możliwe tylko w REQUESTED, LABEL_ISSUED lub
+PICKUP_SCHEDULED. Ponowne anulowanie również daje 409. Odczytaj aktualny stan.
+
+## Concurrency conflict
+
+Kod: `CONCURRENCY_CONFLICT`.
+
+HTTP 409. Inne żądanie zmieniło zwrot od czasu jego odczytu. Odczytaj bieżący
+stan i oceń, czy nadal można wykonać polecenie, zanim je ponowisz.
+
+## Invalid state transition
+
+Kod: `INVALID_STATE_TRANSITION`.
+
+HTTP 409. Polecenie prowadzi do niedozwolonego przejścia stanu. Samo ponowienie
+bez zmiany stanu nie rozwiąże problemu.

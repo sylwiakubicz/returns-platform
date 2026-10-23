@@ -2,16 +2,20 @@ package dev.rma.returns.adapter.out.persistence;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -53,6 +57,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.rma.returns.adapter.in.scheduling.IdempotencyCleanupJob;
 import dev.rma.returns.adapter.in.web.ReturnApiExceptionHandler;
 import dev.rma.returns.adapter.in.web.ReturnCreationController;
+import dev.rma.returns.adapter.in.web.ReturnHistoryResponseMapper;
+import dev.rma.returns.adapter.in.web.ReturnLifecycleController;
 import dev.rma.returns.adapter.out.id.UuidV7RmaIdGenerator;
 import dev.rma.returns.adapter.out.persistence.mappers.EventJsonMapper;
 import dev.rma.returns.adapter.out.persistence.mappers.RmaStateJsonMapper;
@@ -64,8 +70,15 @@ import dev.rma.returns.application.ReturnQueryService;
 import dev.rma.returns.application.exception.IdempotencyKeyReuseException;
 import dev.rma.returns.application.exception.InvalidReturnRequestException;
 import dev.rma.returns.application.model.ReturnCreationResponse;
+import dev.rma.returns.application.port.out.EventStore;
 import dev.rma.returns.application.port.out.IdempotencyStore;
+import dev.rma.returns.domain.InspectionResult;
+import dev.rma.returns.domain.enums.FailureCode;
+import dev.rma.returns.domain.enums.ItemGrade;
+import dev.rma.returns.domain.events.DomainEvent;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
+import dev.rma.returns.domain.policy.InspectionPolicy;
+import dev.rma.returns.domain.policy.RefundPolicy;
 
 @Testcontainers
 @SpringJUnitConfig(IdempotentReturnCreationIT.TestConfig.class)
@@ -102,6 +115,12 @@ class IdempotentReturnCreationIT {
     @Autowired
     ReturnApiExceptionHandler exceptionHandler;
 
+    @Autowired
+    ReturnLifecycleController lifecycleController;
+
+    @Autowired
+    EventStore eventStore;
+
     private MockMvc mvc;
 
     private static final String JSON =
@@ -117,7 +136,7 @@ class IdempotentReturnCreationIT {
 
     @BeforeEach
     void clearDatabase() {
-        mvc = MockMvcBuilders.standaloneSetup(controller)
+        mvc = MockMvcBuilders.standaloneSetup(controller, lifecycleController)
                 .setControllerAdvice(exceptionHandler)
                 .build();
         admin.update("DELETE FROM returns.rma_snapshots");
@@ -532,12 +551,160 @@ class IdempotentReturnCreationIT {
         }
     }
 
+    @Test
+    void httpCancelsReturnAndExposesCompleteHistory() throws Exception {
+        service.create("key", body());
+        mvc.perform(post("/api/v1/returns/RMA-2026-000001/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cancelledBy\":\"customer-1\",\"reason\":\"Changed mind\"}"))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        mvc.perform(get("/api/v1/returns/RMA-2026-000001/history"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].type").value("RmaRequested"))
+                .andExpect(jsonPath("$[0].version").value(1))
+                .andExpect(jsonPath("$[0].schemaVersion").value(1))
+                .andExpect(jsonPath("$[0].eventId").isString())
+                .andExpect(jsonPath("$[0].payload.requestedAt").value("2026-10-21T10:00:00Z"))
+                .andExpect(jsonPath("$[0].payload.items[0].unitPrice.amount").value("100.00"))
+                .andExpect(jsonPath("$[0].payload.items[0].unitPrice.currency").value("PLN"))
+                .andExpect(jsonPath("$[1].type").value("RmaCancelled"))
+                .andExpect(jsonPath("$[1].version").value(2))
+                .andExpect(jsonPath("$[1].occurredAt").value("2026-10-21T10:00:00Z"))
+                .andExpect(jsonPath("$[1].payload.cancelledBy").value("customer-1"))
+                .andExpect(jsonPath("$[1].payload.reason").value("Changed mind"));
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM returns.rma_projection", String.class))
+                .isEqualTo("CANCELLED");
+        mvc.perform(post("/api/v1/returns/RMA-2026-000001/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cancelledBy\":\"customer-1\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CANCELLATION_NOT_ALLOWED"));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(2);
+    }
+
+    @Test
+    void httpReturnsFullHistoryDespiteSnapshotAndMissingProjection() throws Exception {
+        var rma = refundPendingReturn();
+        Instant at = Instant.parse("2026-10-21T11:00:00Z");
+        long expectedVersion = rma.version();
+        var events = new ArrayList<DomainEvent>();
+        while (rma.version() < 51) {
+            events.add(
+                    rma.failRefund(FailureCode.TIMEOUT, "timeout", rma.state().payoutAttempt(), true, at));
+            at = at.plusSeconds(60);
+            events.add(rma.retryRefund(at));
+            at = at.plusSeconds(60);
+        }
+        eventStore.append(rma.rmaId(), expectedVersion, events);
+        long snapshotVersion = rma.version();
+        eventStore.append(
+                rma.rmaId(),
+                snapshotVersion,
+                List.of(rma.failRefund(
+                        FailureCode.TIMEOUT, "timeout", rma.state().payoutAttempt(), true, at)));
+        assertThat(jdbcTemplate.queryForObject("SELECT version FROM returns.rma_snapshots", Integer.class))
+                .isEqualTo((int) snapshotVersion);
+        jdbcTemplate.update("DELETE FROM returns.rma_projection");
+        var result = mvc.perform(get("/api/v1/returns/RMA-2026-000001/history"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(rma.version()))
+                .andExpect(jsonPath("$[6].type").value("RefundDecided"))
+                .andExpect(jsonPath("$[6].payload.refundAmount.amount").value("85.00"))
+                .andReturn();
+        var json = mapper.readTree(result.getResponse().getContentAsByteArray());
+        var ids = jdbcTemplate.queryForList("SELECT event_id FROM returns.rma_events ORDER BY version", UUID.class);
+        for (int i = 0; i < json.size(); i++) {
+            assertThat(json.get(i).path("version").asInt()).isEqualTo(i + 1);
+            assertThat(json.get(i).path("schemaVersion").asInt()).isEqualTo(1);
+            assertThat(json.get(i).path("eventId").asText())
+                    .isEqualTo(ids.get(i).toString());
+            assertThat(json.get(i).path("rmaId").asText()).isEqualTo(rma.rmaId().toString());
+        }
+    }
+
+    @Test
+    void httpRejectsCancellationAfterInspectionWithoutAddingEvent() throws Exception {
+        var rma = refundPendingReturn();
+        int version = rma.version();
+        mvc.perform(post("/api/v1/returns/RMA-2026-000001/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cancelledBy\":\"customer-1\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CANCELLATION_NOT_ALLOWED"));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM returns.rma_events", Integer.class))
+                .isEqualTo(version);
+    }
+
+    @ParameterizedTest
+    @ValueSource(
+            strings = {
+                "{}",
+                "null",
+                "{invalid",
+                "{\"cancelledBy\":\" \"}",
+                "{\"cancelledBy\":\"customer\",\"reason\":42}",
+                "{\"cancelledBy\":\"customer\",\"extra\":true}"
+            })
+    void httpRejectsInvalidCancellationBody(String body) throws Exception {
+        mvc.perform(post("/api/v1/returns/RMA-2026-000001/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    void httpValidatesNumbersAndReturns404ForUnknownReturn() throws Exception {
+        mvc.perform(get("/api/v1/returns/RMA-2026-999999/history"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("RETURN_NOT_FOUND"));
+        mvc.perform(post("/api/v1/returns/RMA-2026-999999/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cancelledBy\":\"customer-1\"}"))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/api/v1/returns/not-a-business-number/history"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("businessNumber"));
+        mvc.perform(post("/api/v1/returns/not-a-business-number/cancel")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"cancelledBy\":\"customer-1\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    private dev.rma.returns.domain.Rma refundPendingReturn() {
+        service.create("key", body());
+        UUID id = jdbcTemplate.queryForObject("SELECT rma_id FROM returns.rma_projection", UUID.class);
+        var rma = eventStore.load(id).orElseThrow();
+        long expected = rma.version();
+        Instant at = Instant.parse("2026-10-21T10:00:00Z");
+        var events = new ArrayList<DomainEvent>();
+        events.add(rma.issueLabel("label", "tracking", "label.pdf", at));
+        events.add(rma.markParcelInTransit(at));
+        events.add(rma.receive(at, "warehouse"));
+        events.add(rma.startInspection("inspector", at));
+        events.addAll(rma.completeInspection(
+                "inspector",
+                at,
+                List.of(new InspectionResult("item-1", ItemGrade.A, null, List.of())),
+                null,
+                new InspectionPolicy(new BigDecimal("500.00")),
+                new RefundPolicy(0, 15, 40, new BigDecimal("15.00"))));
+        eventStore.append(id, expected, events);
+        return rma;
+    }
+
     @Configuration
     @EnableTransactionManagement
     @Import({
         PostgresEventStore.class,
         IdempotentReturnCreationService.class,
         ReturnCreationController.class,
+        ReturnLifecycleController.class,
+        ReturnHistoryResponseMapper.class,
         ReturnApiExceptionHandler.class,
         IdempotencyCleanupJob.class,
         ReturnCommandService.class,
