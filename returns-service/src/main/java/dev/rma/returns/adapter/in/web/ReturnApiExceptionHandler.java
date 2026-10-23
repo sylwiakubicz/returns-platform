@@ -27,7 +27,7 @@ import dev.rma.returns.domain.enums.RmaErrorCode;
 import dev.rma.returns.domain.exceptions.InvalidRmaStateTransitionException;
 import dev.rma.returns.domain.exceptions.RmaDomainException;
 
-/** Obsługa błędów tworzenia i protokołu HTTP; wspólne uporządkowanie w module common pozostaje do wykonania. */
+/** Obsługa błędów API zwrotów; wspólny katalog błędów w module common pozostaje do kolejnego kroku. */
 @RestControllerAdvice
 public class ReturnApiExceptionHandler extends ResponseEntityExceptionHandler {
     private static final Logger LOG = LoggerFactory.getLogger(ReturnApiExceptionHandler.class);

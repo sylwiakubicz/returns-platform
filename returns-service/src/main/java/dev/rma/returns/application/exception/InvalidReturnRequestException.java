@@ -4,7 +4,7 @@ public class InvalidReturnRequestException extends RuntimeException {
     private final String field;
 
     public InvalidReturnRequestException(Throwable cause) {
-        super("Request body must be a JSON return creation request", cause);
+        super("Request body must be a valid JSON object matching the endpoint schema", cause);
         this.field = "$";
     }
 
