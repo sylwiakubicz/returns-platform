@@ -1,0 +1,20 @@
+{
+  "orderId": "order-example-1",
+  "customerId": "customer-example-1",
+  "orderDeliveredAt": "2026-10-20T10:00:00Z",
+  "reason": "CHANGED_MIND",
+  "customerNote": "Przykładowe zgłoszenie zwrotu",
+  "currency": "PLN",
+  "items": [
+    {
+      "itemId": "item-1",
+      "sku": "BOOK-001",
+      "name": "Książka",
+      "quantity": 1,
+      "unitPrice": {
+        "amount": "100.00",
+        "currency": "PLN"
+      }
+    }
+  ]
+}
