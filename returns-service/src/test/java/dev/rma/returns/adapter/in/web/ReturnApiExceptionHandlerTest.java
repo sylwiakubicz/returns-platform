@@ -1,5 +1,6 @@
 package dev.rma.returns.adapter.in.web;
 
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -17,7 +18,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.validation.Errors;
+import org.springframework.validation.Validator;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,9 +75,39 @@ class ReturnApiExceptionHandlerTest {
                 .andExpect(jsonPath("$.detail").isNotEmpty());
         assertCatalogLink(mvc, problem, code);
         if (failure instanceof InvalidReturnRequestException invalid) {
-            mvc.perform(get("/test/failure"))
-                    .andExpect(jsonPath("$.errors[0].field").value(invalid.field()));
+            problem.andExpect(jsonPath("$.errors[0].field").value(invalid.field()));
         }
+        if (status == 500) {
+            problem.andExpect(jsonPath("$.detail").value("The request could not be completed"));
+        }
+    }
+
+    static Stream<Arguments> invalidBodies() {
+        return Stream.of(
+                Arguments.of(
+                        """
+                        {"orderId":"","customerId":"customer-1"}
+                        """,
+                        new String[] {"orderId"}),
+                Arguments.of("{}", new String[] {"orderId", "customerId"}),
+                Arguments.of("{", new String[] {"$"}));
+    }
+
+    @ParameterizedTest
+    @MethodSource("invalidBodies")
+    void reportsAllInvalidBodyFields(String body, String[] fields) throws Exception {
+        var mvc = MockMvcBuilders.standaloneSetup(new ValidationController())
+                .setControllerAdvice(new ReturnApiExceptionHandler())
+                .setValidator(new RequestValidator())
+                .build();
+        assertProblem(
+                        mvc.perform(post("/test/validation")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(body)),
+                        400,
+                        "INVALID_REQUEST",
+                        "/test/validation")
+                .andExpect(jsonPath("$.errors[*].field", containsInAnyOrder(fields)));
     }
 
     @Test
@@ -173,6 +209,34 @@ class ReturnApiExceptionHandlerTest {
                 .andExpect(jsonPath("$.exception").doesNotExist())
                 .andExpect(jsonPath("$.cause").doesNotExist())
                 .andExpect(content().string(not(containsString(SECRET))));
+    }
+
+    @RestController
+    static class ValidationController {
+        @PostMapping("/test/validation")
+        public void validate(@RequestBody @Validated ValidationRequest request) {
+            throw new AssertionError("Invalid request must not reach the controller");
+        }
+    }
+
+    record ValidationRequest(String orderId, String customerId) {}
+
+    static class RequestValidator implements Validator {
+        @Override
+        public boolean supports(Class<?> type) {
+            return type == ValidationRequest.class;
+        }
+
+        @Override
+        public void validate(Object target, Errors errors) {
+            var request = (ValidationRequest) target;
+            if (request.orderId() == null || request.orderId().isBlank()) {
+                errors.rejectValue("orderId", "required", "Order ID is required");
+            }
+            if (request.customerId() == null || request.customerId().isBlank()) {
+                errors.rejectValue("customerId", "required", "Customer ID is required");
+            }
+        }
     }
 
     @RestController
