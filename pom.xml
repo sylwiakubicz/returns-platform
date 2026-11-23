@@ -22,6 +22,7 @@
     <spring-boot.version>3.5.4</spring-boot.version>
     <archunit.version>1.3.0</archunit.version>
     <assertj.version>3.26.3</assertj.version>
+    <commonmark.version>0.32.0</commonmark.version>
 
     <jib.version>3.4.4</jib.version>
     <jacoco.version>0.8.12</jacoco.version>
@@ -55,6 +56,11 @@
         <groupId>org.assertj</groupId>
         <artifactId>assertj-core</artifactId>
         <version>${assertj.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.commonmark</groupId>
+        <artifactId>commonmark-ext-heading-anchor</artifactId>
+        <version>${commonmark.version}</version>
       </dependency>
       <dependency>
         <groupId>dev.rma</groupId>

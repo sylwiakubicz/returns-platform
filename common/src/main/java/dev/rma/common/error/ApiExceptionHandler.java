@@ -17,12 +17,14 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
 
 public abstract class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 
+    public static final String ERROR_CATALOG_PATH = "/docs/errors";
+
     private static final Logger LOG = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     protected ProblemDetail problem(int status, String code, String title, String detail, WebRequest request) {
         var problem = ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(status), detail);
         problem.setTitle(title);
-        problem.setType(URI.create("/docs/03-kontrakty.md#"
+        problem.setType(URI.create(ERROR_CATALOG_PATH + "#"
                 + code.toLowerCase(java.util.Locale.ROOT).replace('_', '-')));
         problem.setInstance(URI.create(request.getDescription(false).substring("uri=".length())));
         problem.setProperty("code", code);
@@ -39,6 +41,9 @@ public abstract class ApiExceptionHandler extends ResponseEntityExceptionHandler
     @Override
     protected ResponseEntity<Object> handleExceptionInternal(
             Exception exception, Object body, HttpHeaders headers, HttpStatusCode status, WebRequest request) {
+        if (status.value() == 500) {
+            return internalError(exception, headers, request);
+        }
         String code =
                 switch (status.value()) {
                     case 400 -> "INVALID_REQUEST";
@@ -46,8 +51,8 @@ public abstract class ApiExceptionHandler extends ResponseEntityExceptionHandler
                     case 406 -> "NOT_ACCEPTABLE";
                     default -> "HTTP_REQUEST_ERROR";
                 };
-        var problem =
-                problem(status.value(), code, "HTTP request error", "Check the request headers and body", request);
+        var problem = problem(
+                status.value(), code, "HTTP request error", "Check the HTTP status and response headers", request);
         if (exception instanceof MethodArgumentNotValidException invalid) {
             var errors = invalid.getBindingResult().getAllErrors().stream()
                     .map(error -> Map.of(
@@ -68,9 +73,13 @@ public abstract class ApiExceptionHandler extends ResponseEntityExceptionHandler
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> unexpectedFailure(Exception exception, WebRequest request) {
+        return internalError(exception, HttpHeaders.EMPTY, request);
+    }
+
+    private ResponseEntity<Object> internalError(Exception exception, HttpHeaders headers, WebRequest request) {
         LOG.error("Unexpected API failure.", exception);
         return response(
                 problem(500, "INTERNAL_ERROR", "Internal server error", "The request could not be completed", request),
-                HttpHeaders.EMPTY);
+                headers);
     }
 }

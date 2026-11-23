@@ -18,6 +18,8 @@
   -
     "name": "Administration"
     "description": "Permanent operational endpoints."
+  - "name": "Documentation"
+    "description": "API error code reference."
 "paths":
   "/api/v1/returns":
     "post":
@@ -500,7 +502,26 @@
           "$ref": "#/components/responses/Error400"
         "500":
           "$ref": "#/components/responses/Error500"
-      "description": "Permanent administrative endpoint. Synchronously rebuilds the projection from the complete event store. Open in stage 3; supervisor authorization is introduced in project stage 4."
+      "description": "Permanent administrative endpoint. Synchronously rebuilds the projection from the complete event store. This operation accepts no idempotency key. After a server error, retry once the issue is resolved and the previous rebuild has finished. Open in stage 3; supervisor authorization is introduced in project stage 4."
+  "/docs/errors":
+    "get":
+      "operationId": "getErrorCatalog"
+      "summary": "Read the API error catalog"
+      "tags":
+        - "Documentation"
+      "responses":
+        "200":
+          "description": "HTML catalog with an anchor for each API problem type."
+          "content":
+            "text/html":
+              "schema":
+                "type": "string"
+        "406":
+          "description": "The Accept header does not allow text/html. Retry with an Accept header that allows it."
+          "content":
+            "application/problem+json":
+              "schema":
+                "$ref": "#/components/schemas/ProblemDetail"
 "components":
   "parameters":
     "BusinessNumber":
@@ -536,7 +557,7 @@
           "schema":
             "$ref": "#/components/schemas/ProblemDetail"
     "Error500":
-      "description": "Unexpected server error; internal details are not exposed."
+      "description": "Unexpected server error. Retry rules depend on the operation and are documented at /docs/errors#internal-error."
       "content":
         "application/problem+json":
           "schema":
@@ -806,7 +827,8 @@
         "type":
           "type": "string"
           "format": "uri-reference"
-          "description": "Documentation URI for this error, for example /docs/errors/CONCURRENCY_CONFLICT; never about:blank."
+          "description": "Same-origin URI reference to the section for this error in the HTML catalog."
+          "example": "/docs/errors#concurrency-conflict"
         "title":
           "type": "string"
         "status":

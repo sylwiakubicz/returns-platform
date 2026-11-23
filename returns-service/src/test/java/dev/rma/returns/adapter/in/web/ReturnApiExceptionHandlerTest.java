@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import java.io.IOException;
+import java.net.URI;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,8 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import dev.rma.returns.application.exception.*;
 import dev.rma.returns.domain.enums.RmaErrorCode;
@@ -57,13 +60,14 @@ class ReturnApiExceptionHandlerTest {
     @ParameterizedTest
     @MethodSource("failures")
     void rendersApiFailuresAsProblemDetails(RuntimeException failure, int status, String code) throws Exception {
-        var mvc = mvc(new FailingController(failure));
-        assertProblem(mvc.perform(get("/test/failure")), status, code, "/test/failure")
+        var mvc = mvc(new FailingController(failure), new ErrorCatalogController());
+        var problem = assertProblem(mvc.perform(get("/test/failure")), status, code, "/test/failure")
                 .andExpect(jsonPath("$.type")
-                        .value("/docs/03-kontrakty.md#"
+                        .value("/docs/errors#"
                                 + code.toLowerCase(java.util.Locale.ROOT).replace('_', '-')))
                 .andExpect(jsonPath("$.title").isNotEmpty())
                 .andExpect(jsonPath("$.detail").isNotEmpty());
+        assertCatalogLink(mvc, problem, code);
         if (failure instanceof InvalidReturnRequestException invalid) {
             mvc.perform(get("/test/failure"))
                     .andExpect(jsonPath("$.errors[0].field").value(invalid.field()));
@@ -105,8 +109,54 @@ class ReturnApiExceptionHandlerTest {
                 "/api/v1/returns");
     }
 
-    private MockMvc mvc(Object controller) {
-        return MockMvcBuilders.standaloneSetup(controller)
+    @Test
+    void followsCatalogLinksFromAdminAndMvcErrors() throws Exception {
+        var adminPath = "/admin/projections/rebuild";
+        var returnsPath = "/api/v1/returns";
+        var mvc = mvc(
+                new ErrorCatalogController(),
+                new ReturnCreationController(null),
+                new RmaProjectionAdminController(() -> {
+                    throw new IllegalStateException(SECRET);
+                }));
+        assertCatalogLink(
+                mvc, assertProblem(mvc.perform(post(adminPath)), 500, "INTERNAL_ERROR", adminPath), "INTERNAL_ERROR");
+        assertCatalogLink(
+                mvc,
+                assertProblem(mvc.perform(get(adminPath)), 405, "HTTP_REQUEST_ERROR", adminPath),
+                "HTTP_REQUEST_ERROR");
+        assertCatalogLink(
+                mvc,
+                assertProblem(
+                        mvc.perform(post(returnsPath)
+                                .contentType(MediaType.TEXT_PLAIN)
+                                .content("{}")),
+                        415,
+                        "UNSUPPORTED_MEDIA_TYPE",
+                        returnsPath),
+                "UNSUPPORTED_MEDIA_TYPE");
+        assertCatalogLink(
+                mvc,
+                assertProblem(
+                        mvc.perform(get("/docs/errors").accept(MediaType.APPLICATION_JSON)),
+                        406,
+                        "NOT_ACCEPTABLE",
+                        "/docs/errors"),
+                "NOT_ACCEPTABLE");
+    }
+
+    private void assertCatalogLink(MockMvc mvc, ResultActions problem, String code) throws Exception {
+        var json = new ObjectMapper().readTree(problem.andReturn().getResponse().getContentAsString());
+        var type = URI.create(json.get("type").asText());
+        mvc.perform(get(type.getPath()).accept(MediaType.TEXT_HTML))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_HTML))
+                .andExpect(content().string(containsString("id=\"" + type.getFragment() + "\">")))
+                .andExpect(content().string(containsString("<code>" + code + "</code>")));
+    }
+
+    private MockMvc mvc(Object... controllers) {
+        return MockMvcBuilders.standaloneSetup(controllers)
                 .setControllerAdvice(new ReturnApiExceptionHandler())
                 .build();
     }
